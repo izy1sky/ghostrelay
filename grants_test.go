@@ -148,6 +148,7 @@ func testServer(t *testing.T, policyJSON string) *server {
 		t.Fatal(err)
 	}
 	a, _ := openAudit(filepath.Join(t.TempDir(), "audit.jsonl"))
+	t.Cleanup(func() { a.f.Close() }) // Windows can't remove an open file
 	st, _ := newGrantStore(filepath.Join(t.TempDir(), "grants.json"))
 	s := &server{adminToken: "admin", audit: a, grants: st, pending: map[string]*pendingCall{}, always: map[string]bool{}}
 	s.pol.Store(p)
