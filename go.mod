@@ -1,4 +1,4 @@
-module relay
+module github.com/izy1sky/ghostrelay
 
 go 1.24.3
 
