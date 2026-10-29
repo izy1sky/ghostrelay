@@ -1,2 +1,6 @@
 dist/
 *.jsonl
+/relay
+/relay.exe
+.idea/
+.DS_Store

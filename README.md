@@ -1,8 +1,24 @@
-# relay
+<p align="center">
+  <img src="assets/logo.svg" width="160" alt="ghostrelay logo: a pixel ghost with a >_ prompt for a face, wired to three terminals">
+</p>
 
-A single binary that lets an agent on one host use the files and shell of
-other hosts that have no public address. A policy on the server decides what
-each agent may do, and asks a human when it should.
+<h1 align="center">ghostrelay</h1>
+
+<p align="center">
+  <b>Your agent, inside every machine you own.</b><br>
+  <code>one MCP hub · nodes dial out · mac · linux · windows</code>
+</p>
+
+<p align="center">
+  <img alt="Go 1.24+" src="https://img.shields.io/badge/go-1.24%2B-39d353?style=flat-square&labelColor=0b0f14&logo=go&logoColor=7dff9b">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-streamable%20HTTP-39d353?style=flat-square&labelColor=0b0f14">
+  <img alt="Platforms" src="https://img.shields.io/badge/nodes-macOS%20%7C%20Linux%20%7C%20Windows-39d353?style=flat-square&labelColor=0b0f14">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-39d353?style=flat-square&labelColor=0b0f14">
+</p>
+
+A single binary, `relay`, that lets an agent on one host use the files and
+shell of other hosts that have no public address. A policy on the server
+decides what each agent may do, and asks a human when it should.
 
 ```
 Host A (agent) ──MCP /mcp──► relay serve (public IP) ◄──WSS /node── relay node (Host B: macOS / Linux / Windows)
