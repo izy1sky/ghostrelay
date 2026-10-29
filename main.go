@@ -16,7 +16,7 @@ import (
 )
 
 // version is set at release time with -ldflags "-X main.version=..."
-var version = "0.6.0-dev"
+var version = "0.7.0-dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -42,6 +42,8 @@ func main() {
 		runHash()
 	case "approvals":
 		runApprovals(os.Args[2:])
+	case "grants":
+		runGrants(os.Args[2:])
 	case "approve":
 		runDecide(os.Args[2:], false)
 	case "deny":
@@ -72,7 +74,8 @@ func usage() {
   relay hash            print sha256 of a token read from stdin (for policy agents)
   relay policy check    validate a policy file and test a call against it
   relay approvals       list calls waiting for approval    (needs RELAY_ADMIN_TOKEN)
-  relay approve <id>    approve one  [--always]
+  relay approve <id>    approve one  [--similar | --node] [--for 1h]  [--always]
+  relay grants          list active grants   (relay grants revoke <id>)
   relay deny <id>       deny one     [--reason "..."]
   relay version`)
 }

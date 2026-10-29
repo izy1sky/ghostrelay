@@ -82,6 +82,7 @@ type policyReq struct {
 	Path              string // normalized: absolute, forward slashes, cleaned
 	HasCommand        bool
 	Command           string
+	Argv              bool // Command was rendered from argv (no shell)
 }
 
 type verdict struct {
@@ -378,7 +379,7 @@ func buildReqs(agent, tool string, raw json.RawMessage, nc *nodeConn) []policyRe
 	case tool == "exec":
 		q.HasCommand, q.Command = true, a.Command
 		if len(a.Argv) > 0 {
-			q.Command = argvString(a.Argv)
+			q.Command, q.Argv = argvString(a.Argv), true
 		}
 		return []policyReq{withPath(q, a.Cwd)}
 	case tool == "fs_move":
@@ -440,40 +441,68 @@ func (s *server) authorize(ctxDone <-chan struct{}, q policyReq) (string, error)
 }
 
 // authorizeMany checks several requests that make up one call (a transfer
-// reads many files and writes many): any deny denies, otherwise any ask asks,
-// once, showing display to the approver.
+// reads many files and writes many). A deny rule denies; otherwise the
+// requests the policy doesn't allow outright must all be covered by grants,
+// or the call asks, once, showing display to the approver.
 func (s *server) authorizeMany(ctxDone <-chan struct{}, qs []policyReq, display policyReq) (string, error) {
 	p := s.pol.Load()
 	if p.none {
 		return "no policy", nil
 	}
 	v, q := p.evalAll(qs)
-	switch v.Action {
-	case actAllow:
-		return v.String(), nil
-	case actDeny:
+	denied := func() error {
 		msg := fmt.Sprintf("denied by policy %s: %s", v, q.summary())
 		if v.Reason != "" {
 			msg += " — " + v.Reason
 		}
-		return v.String(), errors.New(msg)
+		return errors.New(msg)
+	}
+	switch {
+	case v.Action == actAllow:
+		return v.String(), nil
+	case v.Action == actDeny && v.Rule != 0:
+		return v.String(), denied() // explicit deny rules beat grants and approvals
+	}
+	var asking []policyReq
+	for _, q := range qs {
+		if p.eval(q).Action != actAllow {
+			asking = append(asking, q)
+		}
+	}
+	if ids := s.grants.cover(asking); ids != nil {
+		return v.String() + ", grant " + strings.Join(ids, ","), nil
+	}
+	if v.Action == actDeny {
+		return v.String(), denied()
 	}
 	if s.alwaysAllowed(display) {
 		return v.String() + ", previously approved always", nil
 	}
-	return s.requestApproval(ctxDone, display, v, p)
+	return s.requestApproval(ctxDone, display, asking, v, p, nil)
 }
 
-// evalAll returns the strictest verdict over qs and the request that drew it.
+// evalAll returns the strictest verdict over qs and the request that drew it:
+// a deny rule over the default's deny, over ask, over allow.
 func (p *policy) evalAll(qs []policyReq) (verdict, policyReq) {
-	rank := map[string]int{actAllow: 0, actAsk: 1, actDeny: 2}
+	rank := func(v verdict) int {
+		switch v.Action {
+		case actAsk:
+			return 1
+		case actDeny:
+			if v.Rule != 0 {
+				return 3
+			}
+			return 2
+		}
+		return 0
+	}
 	worst, worstQ := verdict{Action: actAllow}, policyReq{}
 	for i, q := range qs {
 		v := p.eval(q)
-		if i == 0 || rank[v.Action] > rank[worst.Action] {
+		if i == 0 || rank(v) > rank(worst) {
 			worst, worstQ = v, q
 		}
-		if v.Action == actDeny {
+		if rank(v) == 3 {
 			break
 		}
 	}

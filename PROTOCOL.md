@@ -141,7 +141,7 @@ server-initiated stream, no sessions). Methods: `initialize`, `ping`,
 
 Tools: `nodes_list`, `node_info`, `exec`, `fs_read`, `fs_write`, `fs_edit`,
 `fs_list`, `fs_stat`, `fs_mkdir`, `fs_move`, `fs_remove`, `fs_glob`, `fs_grep`,
-`job_logs`, `job_kill`, `jobs_list`, `transfer`. Every tool except
+`job_logs`, `job_kill`, `jobs_list`, `transfer`, `request_grant`. Every tool except
 `nodes_list` and `transfer` (which takes `src_node` / `dst_node`) takes a
 required `node` argument;
 there is no implicit default node.
@@ -170,14 +170,36 @@ regexes see the arguments joined with spaces, quoted where needed.
 `transfer` is evaluated as `fs_read` on every source file and `fs_write` on
 every destination file and directory. The strictest verdict wins (deny > ask >
 allow), with one approval for the whole transfer. A timeout or a deny returns a tool error. The approval wait is not
-  counted against `exec`'s own timeout.
+counted against `exec`'s own timeout.
+
+### Grants (v0.7)
+
+Between the verdict and the approval sits a grant check. A deny **rule** is
+final. Otherwise every request of the call that the policy doesn't allow
+(ask, or the default) must be covered by an active grant, or the call asks.
+A grant `{agent, node, tools?, paths?, programs?, expires}` covers a request
+when the agent and node are equal, the tool is listed (or none are), the path
+matches a glob (folded like rule paths; for exec only when no programs are
+listed), and for exec the program is listed: `argv[0]`, or the first word of a
+shell command with no `; & | < > `` ` `` $(` in it, as a lowercase base name
+without `.exe`. Grants are stored in `grants.json` beside the policy (0600) and
+pruned when they expire (at most 24 h).
+
+`request_grant {node, programs?, paths?, tools?, minutes?, reason}` creates a
+pending entry of kind `grant`; approving it stores that grant (for `minutes`,
+default 60, max 480, unless the approver gives another duration) and returns
+its id, scope and expiry to the agent. Relative `paths` hang off the node's
+first root; a path without glob characters means that folder and everything
+in it. A deny rule on `request_grant` stops an agent from asking.
 
 Admin endpoints, all with `Authorization: Bearer <ADMIN_TOKEN>`:
 
 | Method + path              | Body / result                                                       |
 |----------------------------|---------------------------------------------------------------------|
-| `GET /admin/api/pending`   | `[{id, agent, node, tool, command?, path?, verdict, reason?, created, expires}]` |
-| `POST /admin/api/decide`   | `{"id", "decision": "allow" \| "always" \| "deny", "reason"?, "by"?}` → `ok`, or 404 if already gone |
+| `GET /admin/api/pending`   | `[{id, kind, agent, node, tool, command?, path?, verdict, reason?, created, expires, similar?, node_scope?, grant_scope?, minutes?}]` |
+| `POST /admin/api/decide`   | `{"id", "decision": "allow" \| "always" \| "similar" \| "node" \| "deny", "minutes"?, "reason"?, "by"?}` → `ok`, or 404 if already gone. `similar` / `node` also store the offered grants for `minutes` (default 60); `allow` on a `grant` entry stores the requested grant |
+| `GET /admin/api/grants`    | active grants: `[{id, agent, node, tools?, paths?, programs?, reason?, by, created, expires, uses, scope}]` |
+| `POST /admin/api/grants/revoke` | `{"id", "by"?}` → `ok`, or 404 |
 | `GET /admin/`              | the approval page; it needs no token to load, but asks for one before showing data |
 
 ## 5. Audit

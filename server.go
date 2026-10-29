@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -37,6 +38,8 @@ type server struct {
 	amu     sync.Mutex
 	pending map[string]*pendingCall
 	always  map[string]bool
+
+	grants *grantStore
 }
 
 func runServe(args []string) {
@@ -86,6 +89,17 @@ func runServe(args []string) {
 			}
 		}
 	}
+	grantsFile := ""
+	if s.policyPath != "" {
+		grantsFile = filepath.Join(filepath.Dir(s.policyPath), "grants.json")
+	}
+	var err error
+	if s.grants, err = newGrantStore(grantsFile); err != nil {
+		log.Fatalf("grants: %v", err)
+	}
+	if n := len(s.grants.active()); n > 0 {
+		log.Printf("%d active grants from %s (relay grants)", n, grantsFile)
+	}
 	a, err := openAudit(*auditPath)
 	if err != nil {
 		log.Fatalf("audit log: %v", err)
@@ -104,6 +118,8 @@ func runServe(args []string) {
 	mux.HandleFunc("/admin", s.handleAdminPage)
 	mux.HandleFunc("/admin/api/pending", s.handlePending)
 	mux.HandleFunc("/admin/api/decide", s.handleDecide)
+	mux.HandleFunc("/admin/api/grants", s.handleGrants)
+	mux.HandleFunc("/admin/api/grants/revoke", s.handleRevoke)
 	mux.HandleFunc("/node", s.handleNode)
 	mux.HandleFunc("/mcp", s.handleMCP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
