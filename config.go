@@ -221,13 +221,13 @@ func runInit(args []string) {
 	dir := fs.String("dir", filepath.Dir(defaultServerConfig()), "where to write the server's settings")
 	listen := fs.String("listen", ":8787", "address the server listens on")
 	pubURL := fs.String("url", "", "address nodes and agents use to reach the server (default: http://<this machine's LAN IP><listen port>)")
-	preset := fs.String("policy", "ask", "starting policy: ask (reads allowed, everything else asks you), readonly, or open (everything allowed; for local tests)")
+	preset := fs.String("policy", "workspace", "starting policy: workspace (reads, file changes and look-around commands allowed; other commands and deletes ask), ask (everything but reads asks), readonly, or open (everything allowed; for local tests)")
 	force := fs.Bool("force", false, "overwrite existing settings (new tokens: existing nodes and agents must be re-added)")
 	fs.Parse(args)
 
 	pol, ok := policyPresets[*preset]
 	if !ok {
-		log.Fatalf("unknown --policy %q (ask, readonly or open)", *preset)
+		log.Fatalf("unknown --policy %q (workspace, ask, readonly or open)", *preset)
 	}
 	cfgPath := filepath.Join(*dir, "server.json")
 	if _, err := os.Stat(cfgPath); err == nil && !*force {
@@ -403,7 +403,33 @@ func runJoin(args []string) {
 
 var readTools = `"nodes_list", "node_info", "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "job_logs", "jobs_list"`
 
+// lookAround are exec commands that only inspect: no file arguments that
+// could reach outside the node's roots, no shell operators to chain more.
+var lookAround = []string{
+	"^git (status|diff|log|show|branch|remote|rev-parse|describe|tag|stash list)( [^;&|<>`$\\n]*)?$",
+	"^(ls|dir|pwd|whoami|hostname|uname|Get-Location|Get-ChildItem|gci|Get-Date|date)( -[A-Za-z]+)*$",
+	"^(which|where|where\\.exe|Get-Command|command -v|type -a) [A-Za-z0-9_.+-]+$",
+	"^[A-Za-z0-9_.+-]+ (--version|-version|-V|version)$",
+}
+
+func lookAroundJSON() string {
+	b, _ := json.Marshal(lookAround)
+	return string(b)
+}
+
 var policyPresets = map[string]string{
+	"workspace": `{
+  "comment": "Written by relay init (preset: workspace). Agents may look around, change files inside each node's roots and run commands that only inspect; other commands and deletes ask you (approve once, similar calls for an hour, or a whole task with request_grant). First matching rule wins; edit freely, the server reloads it within 2 seconds.",
+  "default": "ask",
+  "approval_timeout_sec": 300,
+  "rules": [
+    {"comment": "Looking around is always fine.", "tools": [` + readTools + `], "action": "allow"},
+    {"comment": "Never touch secrets or git internals, even with a grant.", "tools": ["fs_write", "fs_edit", "fs_move", "fs_remove"], "paths": ["**/.git/**", "**/*.env", "**/.env", "**/.ssh/**"], "action": "deny", "reason": "secrets and git internals are off limits"},
+    {"comment": "Changing files is fine: nodes keep it inside their roots.", "tools": ["fs_write", "fs_edit", "fs_mkdir", "fs_move"], "action": "allow"},
+    {"comment": "Commands that only look (git status, ls, --version...).", "tools": ["exec"], "commands": ` + lookAroundJSON() + `, "action": "allow"}
+  ]
+}
+`,
 	"ask": `{
   "comment": "Written by relay init (preset: ask). First matching rule wins. Edit freely: the server reloads it within 2 seconds. See policy.example.json in the repo for more.",
   "default": "ask",

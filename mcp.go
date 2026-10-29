@@ -116,6 +116,8 @@ func (s *server) dispatchRPC(ctx context.Context, agent, remote string, req *rpc
 				"prefer them over shell commands for file work. exec with argv runs a program directly (same on every OS); " +
 				"exec with command uses the node's shell (PowerShell on Windows, bash or sh elsewhere). " +
 				"For long commands use background=true, then poll job_logs with offset and wait_sec. " +
+				"Before a task that needs many calls the policy asks a human about (running programs, deleting), call request_grant once " +
+				"with the programs, folders and minutes the task needs and a one-line reason; a single approval then covers them. " +
 				"Some calls may wait for a human to approve them.",
 		}, nil
 	case "ping":
@@ -193,6 +195,9 @@ func (s *server) runTool(ctx context.Context, agent, name string, raw json.RawMe
 
 	if name == "transfer" {
 		return s.runTransfer(ctx, agent, raw)
+	}
+	if name == "request_grant" {
+		return s.runRequestGrant(ctx.Done(), agent, raw)
 	}
 
 	var base struct {
@@ -735,6 +740,21 @@ var toolDefs = []map[string]any{
 			"max":         prop("integer", "Max matching lines (default 200)."),
 		}),
 		"annotations": map[string]any{"readOnlyHint": true},
+	},
+	{
+		"name": "request_grant",
+		"description": "Ask the human approver, once, to allow a whole task instead of approving its calls one by one. " +
+			"Describe the scope: the node, which programs exec may run, which folders may be changed, for how many minutes, and why. " +
+			"Blocks until the approver decides. Inside the granted scope, calls then run without asking; policy deny rules still apply. " +
+			"Use it before multi-step work such as building, testing or reorganizing a project.",
+		"inputSchema": schema([]string{"node", "reason"}, map[string]any{
+			"node":     nodeProp,
+			"programs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": `Programs exec may run, by name, e.g. ["python", "git", "dotnet"]. Shell commands must be a single program (no ; | && >) to match.`},
+			"paths":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": `Folders file changes are limited to (and everything in them), e.g. ["D:/work/app"]. For exec they limit the cwd only when no programs are listed. Omit for the whole node.`},
+			"tools":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": `Limit to these tools, e.g. ["exec", "fs_write", "fs_edit", "fs_remove"]. Omit for all tools.`},
+			"minutes":  prop("integer", "How long the grant lasts (default 60, max 480)."),
+			"reason":   prop("string", "One line on what the task is, shown to the approver."),
+		}),
 	},
 	{
 		"name":        "fs_list",

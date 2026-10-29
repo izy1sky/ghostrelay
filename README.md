@@ -87,7 +87,8 @@ Day to day:
 | Command | Does |
 |---|---|
 | `relay service status` / `logs [-f]` / `uninstall` | check, follow or remove the node service (add `server` for the server's) |
-| `relay approvals`, `relay approve <id>`, `relay deny <id>` | decide calls the policy asks about (on the server, no setup needed) |
+| `relay approvals`, `relay approve <id> [--similar\|--node] [--for 1h]`, `relay deny <id>` | decide calls the policy asks about (on the server, no setup needed) |
+| `relay grants`, `relay grants revoke <id>` | see and end the grants that let calls through without asking |
 | `relay invite` | the join code and agent command again |
 
 Settings live in `~/.relay` (`RELAY_HOME` moves it): `server/server.json`,
@@ -95,10 +96,16 @@ Settings live in `~/.relay` (`RELAY_HOME` moves it): `server/server.json`,
 readable by you. The keys are the flag names below, so anything a flag can
 set, the file can too; flags win over the file.
 
-The default policy (`relay init --policy ask`) lets agents look around
-freely, never lets them write to `.git`, `.env` or `.ssh`, and asks you about
-everything else. `--policy readonly` and `--policy open` are the other starting
-points.
+The default policy (`relay init --policy workspace`) lets agents work without
+asking you at every step:
+
+| Allowed | Asks you | Denied |
+|---|---|---|
+| reading and searching; writing, editing, moving files and making folders (inside each node's roots, which the node enforces); commands that only look, like `git status`, `ls`, `python --version` | other commands, deletes | writes to `.git`, `.env`, `.ssh` |
+
+When it does ask, one approval can cover many calls: see
+[Grants](#grants-approve-once-for-many-calls). Other starting points:
+`--policy ask` (everything but reads asks), `readonly`, and `open` (local tests).
 
 ## Build
 
@@ -336,26 +343,69 @@ out matches anything.
 
 ### Approving `ask` calls
 
-The tool call blocks while it waits. You can decide in three ways:
+The tool call waits **on the server**; the node sees nothing until you decide.
+You can decide in three ways:
 
 - **Web:** open `https://your-server:8787/admin/` (on your phone too). Paste the
-  admin token once per tab, then tap **Allow**, **Allow always** or **Deny**.
+  admin token once per tab. Each waiting call offers **Allow once**, **Allow
+  similar** (for example *exec of python on win*), **Everything on node**, and
+  **Deny**; the wider two last as long as the duration picker says. The page
+  also lists active grants, with **Revoke**.
 - **CLI:**
   ```bash
-  export RELAY_SERVER=https://your-server:8787 RELAY_ADMIN_TOKEN=...
+  export RELAY_SERVER=https://your-server:8787 RELAY_ADMIN_TOKEN=...   # not needed on the server itself
   ./relay approvals
-  ./relay approve 5f3892ba            # or --always
+  ./relay approve 5f3892ba                       # this call only
+  ./relay approve 5f3892ba --similar --for 1h    # and calls like it
+  ./relay approve 5f3892ba --node --for 30m      # and everything on that node
   ./relay deny 5f3892ba --reason "not that folder"
   ```
 - **Notification:** set `notify.url` and the server POSTs each request there.
   `kind`: `json` (default), `text` (plain body, works with ntfy), or `wecom`
   (WeCom group robot).
 
-**Allow always** approves identical calls (same agent, node, tool, path and
-command) until the server restarts. It's kept in memory only.
+`relay approve --always` still approves identical calls (same agent, node,
+tool, path and command) until the server restarts.
 
 Without `RELAY_ADMIN_TOKEN`, `ask` calls are refused right away, because nobody
 could approve them.
+
+### Grants: approve once for many calls
+
+A grant lets calls through without asking, for one agent, for a while. There
+are two ways to get one:
+
+1. **You widen an approval.** *Allow similar* grants the same program on that
+   node (`python build.py` → *exec of python on win*), or the same kind of
+   change under the folder the paths share (*fs_write, fs_edit, fs_mkdir in
+   D:/work/app/\*\**). *Everything on node* grants all tools there.
+2. **The agent asks for a whole task first,** with the `request_grant` tool:
+   > node `win`, programs `dotnet`, `git`; folder `D:/work/app`; 45 minutes;
+   > *"Build and test the app"*
+
+   You approve one card (**Grant for 45 min**, or for the duration you pick),
+   and the task's calls run without asking. The agent is told to do this
+   before multi-step work.
+
+How grants behave:
+- **Deny rules always win.** No grant writes to `.git`, `.env` or whatever a
+  rule denies. A grant covers calls the policy would ask about or that fall
+  through to its default.
+- **Program grants need a single program.** A shell command that could run
+  several (`;`, `&&`, `|`, `>`, `` ` ``, `$(...)`) is not "python", so
+  `python a.py; rm -rf ~` still asks. Commands given as `argv` always name
+  one program.
+- **A program grant trusts the program**, wherever it runs: listed programs
+  are the scope for exec, and folders limit only file changes (or exec's cwd,
+  when no programs are listed).
+- **They expire** (up to 24 h; `request_grant` asks for at most 8 h), are saved
+  in `grants.json` next to the policy so restarts keep them, and can be revoked
+  any time: `relay grants revoke <id>` or the admin page.
+- **Every use is audited**: the audit log's `policy` field names the grant, as
+  in `ask (default), grant g6e481918`.
+
+To stop an agent from asking for grants at all, deny the tool:
+`{"agents": ["ci"], "tools": ["request_grant"], "action": "deny"}`.
 
 ## Security model
 

@@ -4,7 +4,8 @@ A walk-through you can follow on one machine in about 30 minutes. Every step
 says what to run and what you should see. Part 1 sets up the server and two
 nodes. Parts 2–9 test one feature each. Part 10 connects a real agent
 (Claude Code), Part 11 adds a Windows or Linux machine, and Part 12 tests
-the one-command setup (`relay init`, `relay join`, `relay service`).
+the one-command setup (`relay init`, `relay join`, `relay service`), and Part 13
+the grants that keep approvals down to one per task.
 
 You need Go 1.24+, Python 3, and `curl`. Commands are for macOS or Linux
 (zsh or bash). Everything stays inside `~/relay-test`.
@@ -378,7 +379,7 @@ claude mcp add --transport http relay http://127.0.0.1:8787/mcp --header "Author
 claude
 ```
 
-In Claude Code, `/mcp` should show `relay` connected with 17 tools. Try:
+In Claude Code, `/mcp` should show `relay` connected with 18 tools. Try:
 
 1. "Which relay nodes are connected, and what OS and shell does each have?"
 2. "On node a, create `demo/app.py` that prints the first 10 primes, run it, and show the output."
@@ -472,7 +473,7 @@ Running `relay init` again refuses: `already exists ... relay invite`.
 
 **Terminal 1:** `RELAY_HOME=~/relay-test/home ./relay serve` (no flags).
 
-✅ `settings from .../server.json`, `policy ...: 2 rules, default ask`, and
+✅ `settings from .../server.json`, `policy ...: 4 rules, default ask` (the `workspace` preset), and
 `reachable as http://127.0.0.1:8790`.
 
 ### 12.2 Join a node
@@ -532,8 +533,86 @@ once at logon and closes; the node keeps running in the background.
 The server can be a service too: `./relay service install server` (and
 `status server`, `logs server`, `uninstall server`).
 
-**Unset `RELAY_HOME`** when you're done with this part, or later commands keep
-using the test settings.
+**Unset `RELAY_HOME`** when you're done with Parts 12 and 13, or later
+commands keep using the test settings.
+
+## Part 13. Grants: one approval per task
+
+Uses the server and node `mac` from Part 12, with `RELAY_HOME` still set and
+the node running (in a terminal or as a service). In terminal 4:
+
+```bash
+export RELAY_HOME=~/relay-test/home
+AT=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/relay-test/home/server/server.json')))['agent-token'])")
+agent() { RELAY_SERVER=http://127.0.0.1:8790 RELAY_AGENT_TOKEN=$AT python3 tests/mcp.py "$@"; }
+```
+
+### 13.1 What the workspace preset lets through
+
+| # | Run | Expect |
+|---|---|---|
+| 13.1a | `agent exec '{"node":"mac","argv":["python3","--version"]}'` | runs: a look-around command |
+| 13.1b | `agent fs_write '{"node":"mac","path":"app/main.py","content":"print(\"hi\")\n"}'` | runs: writes inside the root are allowed |
+| 13.1c | `agent fs_write '{"node":"mac","path":"app/.git/config","content":"x"}'` | `denied by policy deny (rule 2)` |
+
+### 13.2 Allow similar
+
+```bash
+agent exec '{"node":"mac","argv":["python3","app/main.py"]}' &
+./relay approvals
+```
+
+✅ The call waits, and `relay approvals` offers
+`relay approve <id> --similar --for 1h → exec of python3 on mac` and
+`--node --for 30m → everything on mac`. Run the `--similar` one, with
+`--for 30m`. The call prints `hi`. Then:
+
+| # | Run | Expect |
+|---|---|---|
+| 13.2a | `agent exec '{"node":"mac","command":"python3 -c \"print(6*7)\""}'` | `42` at once: covered by the grant |
+| 13.2b | `agent exec '{"node":"mac","command":"python3 -V; ls"}' &`, then `./relay approvals` | it asks: a chained shell command is not just `python3`. Deny it |
+| 13.2c | `./relay grants` | `exec of python3 on mac`, `until ...`, `used 1×` |
+
+### 13.3 The agent asks for the whole task
+
+```bash
+agent request_grant '{"node":"mac","programs":["sh","rm"],"paths":["app"],"minutes":20,"reason":"Build and clean the demo app"}' &
+./relay approvals
+```
+
+✅ One card: `wants: exec of sh, rm; any other tool in .../app/** on mac for 20 min`,
+`why: Build and clean the demo app`. `./relay approve <id>`, and the agent gets
+`granted g...: ..., until HH:MM (20m0s)`. Then:
+
+| # | Run | Expect |
+|---|---|---|
+| 13.3a | `agent exec '{"node":"mac","argv":["sh","-c","echo built > app/out.txt; cat app/out.txt"]}'` | `built`, without asking |
+| 13.3b | `agent fs_remove '{"node":"mac","path":"app/out.txt"}'` | removed, without asking (inside `app/`) |
+| 13.3c | `./relay grants revoke <that grant's id>`, then repeat 13.3b on `app/main.py` | it asks again |
+
+### 13.4 On the admin page
+
+Open <http://127.0.0.1:8790/admin/>, paste the admin token
+(`relay invite` prints it), then queue a few calls:
+
+```bash
+agent exec '{"node":"mac","argv":["node","build.js"]}' &
+agent exec '{"node":"mac","command":"npm ci && npm test"}' &
+agent request_grant '{"node":"mac","programs":["npm","node"],"paths":["app"],"minutes":45,"reason":"Install deps and run the tests"}' &
+```
+
+✅ Three cards:
+- `node build.js`: **Allow once**, **Allow similar** (*exec of node on mac*),
+  **Everything on node**, **Deny**.
+- `npm ci && npm test`: no **Allow similar**, because it's a chained command.
+- The grant request: in a blue-edged card with its reason, offering
+  **Grant for 45 min** (as asked), **Grant for 1 h** (the picker's duration)
+  and **Deny**.
+
+Above them, **Allow all 2 waiting from default** approves the calls once each.
+Click **Allow similar**: the call runs, and *Active grants* lists
+`exec of node on mac` with **Revoke**. Grants survive a server restart: stop
+and start `relay serve`, and they're still there (`relay grants`).
 
 ---
 
