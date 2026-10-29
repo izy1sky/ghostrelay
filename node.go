@@ -85,6 +85,10 @@ func runNode(args []string) {
 		a.roots = append(a.roots, abs)
 	}
 	a.shell = detectShell()
+	caseInsensitive := make([]bool, len(a.roots))
+	for i, r := range a.roots {
+		caseInsensitive[i] = probeCaseInsensitive(r)
+	}
 	if *stateDir == "" {
 		cache, err := os.UserCacheDir()
 		if err != nil {
@@ -110,11 +114,13 @@ func runNode(args []string) {
 	}
 	a.info = NodeInfo{
 		Name: *name, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Hostname: host,
-		Shell: a.shell, Roots: a.roots, AllowExec: *allowExec,
+		Shell: a.shell, ShellKind: shellKind(a.shell), PathSep: string(filepath.Separator),
+		Roots: a.roots, RootsCaseInsensitive: caseInsensitive, AllowExec: *allowExec,
 		MaxOutput: *maxOutput, MaxTimeout: *maxTimeout, MaxJobs: *maxJobs, MaxJobTime: *maxJobTimeout, Tools: tools,
 	}
 
-	log.Printf("relay node %q -> %s  roots=%v exec=%v", a.info.Name, a.url, a.roots, a.info.AllowExec)
+	log.Printf("relay node %q -> %s  %s/%s shell=%s roots=%v case-insensitive=%v exec=%v",
+		a.info.Name, a.url, a.info.OS, a.info.Arch, a.info.ShellKind, a.roots, caseInsensitive, a.info.AllowExec)
 	backoff := time.Second
 	for {
 		connected, err := a.session()
@@ -320,6 +326,30 @@ func (a *nodeAgent) dispatchTransfer(op string, raw json.RawMessage) (any, error
 			return a.doStat(args)
 		}
 		return a.doWalk(args)
+	case "fs_move":
+		var args MoveArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return nil, err
+		}
+		return a.doMove(args)
+	case "fs_remove":
+		var args RemoveArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return nil, err
+		}
+		return a.doRemove(args)
+	case "fs_glob":
+		var args GlobArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return nil, err
+		}
+		return a.doGlob(args)
+	case "fs_grep":
+		var args GrepArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return nil, err
+		}
+		return a.doGrep(args)
 	case "fs_mkdir":
 		var args MkdirArgs
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -433,20 +463,32 @@ func (a *nodeAgent) shellCmd(command string) *exec.Cmd {
 	return exec.Command(a.shell, "-c", command)
 }
 
+// buildCmd runs argv directly when given (identical on every OS: no shell,
+// no quoting rules), otherwise the command line in the node's shell.
+func (a *nodeAgent) buildCmd(args ExecArgs) *exec.Cmd {
+	if len(args.Argv) > 0 {
+		return exec.Command(args.Argv[0], args.Argv[1:]...)
+	}
+	return a.shellCmd(args.Command)
+}
+
 func (a *nodeAgent) doExec(ctx context.Context, args ExecArgs) (any, error) {
 	if !a.info.AllowExec {
 		return nil, errors.New("exec is disabled on this node (start it with --allow-exec)")
 	}
-	if strings.TrimSpace(args.Command) == "" {
-		return nil, errors.New("command is empty")
+	if (strings.TrimSpace(args.Command) == "") == (len(args.Argv) == 0) {
+		return nil, errors.New("give exactly one of command (runs in the node's shell) or argv (runs a program directly)")
 	}
 	cwd, err := a.resolve(args.Cwd)
 	if err != nil {
 		return nil, err
 	}
 	if args.Background {
-		cmd := a.shellCmd(args.Command)
+		cmd := a.buildCmd(args)
 		cmd.Dir = cwd
+		if args.Command == "" {
+			args.Command = argvString(args.Argv)
+		}
 		return a.jobs.start(cmd, args, cwd)
 	}
 	timeout := args.TimeoutSec
@@ -457,7 +499,7 @@ func (a *nodeAgent) doExec(ctx context.Context, args ExecArgs) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := a.shellCmd(args.Command)
+	cmd := a.buildCmd(args)
 	cmd.Dir = cwd
 	stdout := &capBuf{max: a.info.MaxOutput}
 	stderr := &capBuf{max: a.info.MaxOutput}

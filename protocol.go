@@ -25,27 +25,33 @@ type Msg struct {
 }
 
 type NodeInfo struct {
-	Name       string            `json:"name"`
-	Version    string            `json:"version"`
-	OS         string            `json:"os"`
-	Arch       string            `json:"arch"`
-	Hostname   string            `json:"hostname"`
-	Shell      string            `json:"shell"`
-	Roots      []string          `json:"roots"`
-	AllowExec  bool              `json:"allow_exec"`
-	MaxOutput  int               `json:"max_output"`
-	MaxTimeout int               `json:"max_timeout_sec"`
-	MaxJobs    int               `json:"max_jobs"`
-	MaxJobTime int               `json:"max_job_timeout_sec"`
-	Tools      map[string]string `json:"tools,omitempty"`
+	Name      string   `json:"name"`
+	Version   string   `json:"version"`
+	OS        string   `json:"os"`
+	Arch      string   `json:"arch"`
+	Hostname  string   `json:"hostname"`
+	Shell     string   `json:"shell"`
+	ShellKind string   `json:"shell_kind"` // powershell | bash | sh
+	PathSep   string   `json:"path_sep"`
+	Roots     []string `json:"roots"`
+	// RootsCaseInsensitive[i] reports whether Roots[i] is on a filesystem that
+	// ignores case (probed at startup, not guessed from the OS).
+	RootsCaseInsensitive []bool            `json:"roots_case_insensitive,omitempty"`
+	AllowExec            bool              `json:"allow_exec"`
+	MaxOutput            int               `json:"max_output"`
+	MaxTimeout           int               `json:"max_timeout_sec"`
+	MaxJobs              int               `json:"max_jobs"`
+	MaxJobTime           int               `json:"max_job_timeout_sec"`
+	Tools                map[string]string `json:"tools,omitempty"`
 }
 
 type ExecArgs struct {
-	Command    string `json:"command"`
-	Cwd        string `json:"cwd,omitempty"`
-	TimeoutSec int    `json:"timeout_sec,omitempty"`
-	Background bool   `json:"background,omitempty"`
-	Owner      string `json:"owner,omitempty"` // set by the server to the calling agent's name
+	Command    string   `json:"command,omitempty"`
+	Argv       []string `json:"argv,omitempty"` // run a program directly, no shell
+	Cwd        string   `json:"cwd,omitempty"`
+	TimeoutSec int      `json:"timeout_sec,omitempty"`
+	Background bool     `json:"background,omitempty"`
+	Owner      string   `json:"owner,omitempty"` // set by the server to the calling agent's name
 }
 
 type ExecResult struct {
@@ -159,14 +165,18 @@ type JobsListResult struct {
 
 type StatArgs struct {
 	Path string `json:"path"`
+	Hash bool   `json:"sha256,omitempty"` // also compute the file's sha256
 }
 
 type StatResult struct {
-	Path   string `json:"path"` // resolved, in the node's own separators
-	Exists bool   `json:"exists"`
-	Dir    bool   `json:"dir,omitempty"`
-	Size   int64  `json:"size,omitempty"`
-	Mode   uint32 `json:"mode,omitempty"` // permission bits
+	Path    string `json:"path"` // resolved, in the node's own separators
+	Exists  bool   `json:"exists"`
+	Dir     bool   `json:"dir,omitempty"`
+	Symlink bool   `json:"symlink,omitempty"` // the path itself is a link (Path is its target)
+	Size    int64  `json:"size,omitempty"`
+	Mode    uint32 `json:"mode,omitempty"` // permission bits
+	ModTime string `json:"mod_time,omitempty"`
+	SHA256  string `json:"sha256,omitempty"`
 }
 
 type WalkEntry struct {
@@ -223,4 +233,50 @@ type PutCloseResult struct {
 	Path   string `json:"path"`
 	Bytes  int64  `json:"bytes"`
 	SHA256 string `json:"sha256"`
+}
+
+// OS-neutral file operations, so agents need no shell for common work.
+
+type MoveArgs struct {
+	Src       string `json:"src"`
+	Dst       string `json:"dst"`
+	Overwrite bool   `json:"overwrite,omitempty"`
+}
+
+type RemoveArgs struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty"`
+}
+
+type GlobArgs struct {
+	Path    string `json:"path,omitempty"`
+	Pattern string `json:"pattern"`
+	Max     int    `json:"max,omitempty"`
+}
+
+type GlobResult struct {
+	Root      string   `json:"root"`
+	Matches   []string `json:"matches"` // relative to root, forward slashes
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+type GrepArgs struct {
+	Path       string `json:"path,omitempty"`
+	Pattern    string `json:"pattern"`
+	Glob       string `json:"glob,omitempty"`
+	IgnoreCase bool   `json:"ignore_case,omitempty"`
+	Max        int    `json:"max,omitempty"`
+}
+
+type GrepMatch struct {
+	File string `json:"file"` // relative to root, forward slashes
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
+type GrepResult struct {
+	Root      string      `json:"root"`
+	Matches   []GrepMatch `json:"matches"`
+	Truncated bool        `json:"truncated,omitempty"`
+	Skipped   int         `json:"skipped_files,omitempty"` // binary or too large
 }

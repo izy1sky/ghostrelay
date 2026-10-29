@@ -18,3 +18,5 @@ func killTree(cmd *exec.Cmd) {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+func isCrossDevice(err error) bool { return err == syscall.EXDEV }

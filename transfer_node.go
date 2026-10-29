@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -93,21 +92,6 @@ func (u *uploads) take(id string) (*upload, error) {
 	delete(u.m, id)
 	os.Remove(filepath.Join(u.dir, id))
 	return up, nil
-}
-
-func (a *nodeAgent) doStat(args StatArgs) (*StatResult, error) {
-	p, err := a.resolve(args.Path)
-	if err != nil {
-		return nil, err
-	}
-	st, err := os.Stat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return &StatResult{Path: p}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &StatResult{Path: p, Exists: true, Dir: st.IsDir(), Size: st.Size(), Mode: uint32(st.Mode().Perm())}, nil
 }
 
 // doWalk lists a directory tree. Symlinks are never followed, so the walk

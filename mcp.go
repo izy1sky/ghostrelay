@@ -110,9 +110,12 @@ func (s *server) dispatchRPC(ctx context.Context, agent, remote string, req *rpc
 			"protocolVersion": pv,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "relay", "version": version},
-			"instructions": "Tools run on remote nodes. Call nodes_list first, then node_info for a node's OS, " +
-				"shell and allowed roots. Windows nodes run commands in PowerShell and use Windows paths. " +
-				"For long commands use exec with background=true, then poll job_logs with offset and wait_sec. " +
+			"instructions": "Tools run on remote nodes, which may be macOS, Linux or Windows. Call nodes_list, then node_info " +
+				"for a node's OS, shell_kind, path separator, roots and whether each root is case-insensitive. " +
+				"The fs_* tools and transfer behave the same on every OS and accept forward slashes everywhere; " +
+				"prefer them over shell commands for file work. exec with argv runs a program directly (same on every OS); " +
+				"exec with command uses the node's shell (PowerShell on Windows, bash or sh elsewhere). " +
+				"For long commands use background=true, then poll job_logs with offset and wait_sec. " +
 				"Some calls may wait for a human to approve them.",
 		}, nil
 	case "ping":
@@ -205,7 +208,12 @@ func (s *server) runTool(ctx context.Context, agent, name string, raw json.RawMe
 	if err != nil {
 		return "", "", err
 	}
-	note, err := s.authorize(ctx.Done(), buildReq(agent, name, raw, nc))
+	reqs := buildReqs(agent, name, raw, nc)
+	display := reqs[0]
+	if len(reqs) == 2 {
+		display.Path = reqs[0].Path + " → " + reqs[1].Path
+	}
+	note, err := s.authorizeMany(ctx.Done(), reqs, display)
 	if err != nil {
 		return "", note, err
 	}
@@ -289,6 +297,99 @@ func (s *server) forward(ctx context.Context, agent string, nc *nodeConn, name s
 			return "", err
 		}
 		return formatList(&res), nil
+
+	case "fs_stat":
+		var args StatArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res StatResult
+		if err := s.quickCall(ctx, nc, "fs_stat", args, &res); err != nil {
+			return "", err
+		}
+		return formatStat(&res), nil
+
+	case "fs_mkdir":
+		var args MkdirArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res StatResult
+		if err := s.quickCall(ctx, nc, "fs_mkdir", args, &res); err != nil {
+			return "", err
+		}
+		return "directory ready: " + res.Path, nil
+
+	case "fs_move":
+		var args MoveArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res StatResult
+		if err := s.quickCall(ctx, nc, "fs_move", args, &res); err != nil {
+			return "", err
+		}
+		return "moved to " + res.Path, nil
+
+	case "fs_remove":
+		var args RemoveArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res map[string]any
+		if err := s.quickCall(ctx, nc, "fs_remove", args, &res); err != nil {
+			return "", err
+		}
+		kind := "file"
+		switch {
+		case res["symlink"] == true:
+			kind = "symlink (its target was not touched)"
+		case res["dir"] == true:
+			kind = "directory"
+		}
+		return fmt.Sprintf("removed %s %v", kind, res["removed"]), nil
+
+	case "fs_glob":
+		var args GlobArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res GlobResult
+		if err := s.quickCall(ctx, nc, "fs_glob", args, &res); err != nil {
+			return "", err
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s  (%d matches for %s)\n", res.Root, len(res.Matches), args.Pattern)
+		for _, m := range res.Matches {
+			b.WriteString(m + "\n")
+		}
+		if res.Truncated {
+			b.WriteString("[truncated; narrow the pattern or raise max]\n")
+		}
+		return b.String(), nil
+
+	case "fs_grep":
+		var args GrepArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return "", err
+		}
+		var res GrepResult
+		if err := s.quickCall(ctx, nc, "fs_grep", args, &res); err != nil {
+			return "", err
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s  (%d matches", res.Root, len(res.Matches))
+		if res.Skipped > 0 {
+			fmt.Fprintf(&b, ", %d binary or large files skipped", res.Skipped)
+		}
+		b.WriteString(")\n")
+		for _, m := range res.Matches {
+			fmt.Fprintf(&b, "%s:%d: %s\n", m.File, m.Line, m.Text)
+		}
+		if res.Truncated {
+			b.WriteString("[truncated; narrow the search or raise max]\n")
+		}
+		return b.String(), nil
 
 	case "job_logs":
 		var args JobLogsArgs
@@ -385,6 +486,29 @@ func formatRead(r *ReadResult) string {
 	return b.String()
 }
 
+func formatStat(r *StatResult) string {
+	if !r.Exists {
+		return r.Path + ": does not exist"
+	}
+	var b strings.Builder
+	kind := "file"
+	if r.Dir {
+		kind = "directory"
+	}
+	fmt.Fprintf(&b, "%s: %s", r.Path, kind)
+	if r.Symlink {
+		b.WriteString(" (reached through a symlink)")
+	}
+	if !r.Dir {
+		fmt.Fprintf(&b, ", %d bytes", r.Size)
+	}
+	fmt.Fprintf(&b, ", mode %04o, modified %s", r.Mode, r.ModTime)
+	if r.SHA256 != "" {
+		fmt.Fprintf(&b, "\nsha256 %s", r.SHA256)
+	}
+	return b.String() + "\n"
+}
+
 func jobLine(j *JobInfo) string {
 	status := j.State
 	if j.ExitCode != nil && j.State == jobExited {
@@ -460,11 +584,15 @@ var toolDefs = []map[string]any{
 	},
 	{
 		"name": "exec",
-		"description": "Run a shell command on a node and return exit code, stdout and stderr. Windows nodes use PowerShell; " +
-			"others use bash. No TTY and empty stdin, so interactive prompts fail. Output per stream is capped.",
-		"inputSchema": schema([]string{"node", "command"}, map[string]any{
+		"description": "Run a program on a node and return exit code, stdout and stderr. Give exactly one of argv or command. " +
+			"argv runs the program directly with exactly these arguments: no shell, no quoting rules, the same on macOS, Linux and Windows, " +
+			"and the exit code is the program's own. command is a command line for the node's shell: check node_info.shell_kind " +
+			"(powershell on Windows, bash or sh elsewhere) and use that shell's syntax. No TTY and empty stdin, so interactive prompts fail. " +
+			"Output per stream is capped.",
+		"inputSchema": schema([]string{"node"}, map[string]any{
 			"node":        nodeProp,
-			"command":     prop("string", "Command line to run."),
+			"argv":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": `Program and arguments, e.g. ["git", "status", "--short"]. Found on the node's PATH.`},
+			"command":     prop("string", "Command line in the node's shell syntax."),
 			"cwd":         prop("string", "Working directory; must be inside the node's roots. Defaults to the first root."),
 			"timeout_sec": prop("integer", "Kill the command after this many seconds (default 120 in the foreground; for background jobs the node's job limit)."),
 			"background":  prop("boolean", "Start as a background job and return its job_id at once. Use for anything that may run longer than a minute or two; read output with job_logs."),
@@ -545,6 +673,68 @@ var toolDefs = []map[string]any{
 			"overwrite": prop("boolean", "Replace existing files (for a directory: merge into an existing one). Default false."),
 		}),
 		"annotations": map[string]any{"destructiveHint": true},
+	},
+	{
+		"name":        "fs_stat",
+		"description": "Does a path exist; is it a file or directory; size, mode, modification time. sha256=true also hashes a file (to compare copies across nodes).",
+		"inputSchema": schema([]string{"node", "path"}, map[string]any{
+			"node":   nodeProp,
+			"path":   prop("string", "Path on the node."),
+			"sha256": prop("boolean", "Also return the file's sha256."),
+		}),
+		"annotations": map[string]any{"readOnlyHint": true},
+	},
+	{
+		"name":        "fs_mkdir",
+		"description": "Create a directory and any missing parents (no error if it exists).",
+		"inputSchema": schema([]string{"node", "path"}, map[string]any{"node": nodeProp, "path": prop("string", "Directory to create.")}),
+	},
+	{
+		"name": "fs_move",
+		"description": "Rename or move a file or directory within one node (use transfer between nodes). A symlink is moved as a link. " +
+			"Fails across volumes; then use transfer and fs_remove.",
+		"inputSchema": schema([]string{"node", "src", "dst"}, map[string]any{
+			"node":      nodeProp,
+			"src":       prop("string", "Existing path."),
+			"dst":       prop("string", "Full new path (not just a target directory)."),
+			"overwrite": prop("boolean", "Replace an existing file at dst."),
+		}),
+		"annotations": map[string]any{"destructiveHint": true},
+	},
+	{
+		"name":        "fs_remove",
+		"description": "Delete a file, a symlink (never its target) or a directory. Non-empty directories need recursive=true. Node roots cannot be removed.",
+		"inputSchema": schema([]string{"node", "path"}, map[string]any{
+			"node":      nodeProp,
+			"path":      prop("string", "Path to delete."),
+			"recursive": prop("boolean", "Delete a directory and everything in it."),
+		}),
+		"annotations": map[string]any{"destructiveHint": true},
+	},
+	{
+		"name": "fs_glob",
+		"description": "Find files by pattern under a directory, e.g. **/*.go or src/*/test_*.py. * stays within one directory, ** crosses directories. " +
+			"Matching follows the filesystem's case sensitivity. Symlinks are not followed.",
+		"inputSchema": schema([]string{"node", "pattern"}, map[string]any{
+			"node":    nodeProp,
+			"path":    prop("string", "Directory to search (default: the node's first root)."),
+			"pattern": prop("string", "Glob, relative to path, with forward slashes."),
+			"max":     prop("integer", "Max results (default 1000)."),
+		}),
+		"annotations": map[string]any{"readOnlyHint": true},
+	},
+	{
+		"name":        "fs_grep",
+		"description": "Search file contents with a regular expression (RE2 syntax) under a directory or in one file. Skips binary files and files over 10 MiB.",
+		"inputSchema": schema([]string{"node", "pattern"}, map[string]any{
+			"node":        nodeProp,
+			"path":        prop("string", "Directory or file (default: the node's first root)."),
+			"pattern":     prop("string", "Regular expression."),
+			"glob":        prop("string", "Only search files matching this glob, e.g. **/*.py."),
+			"ignore_case": prop("boolean", "Case-insensitive match."),
+			"max":         prop("integer", "Max matching lines (default 200)."),
+		}),
+		"annotations": map[string]any{"readOnlyHint": true},
 	},
 	{
 		"name":        "fs_list",

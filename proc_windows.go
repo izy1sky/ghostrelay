@@ -21,3 +21,6 @@ func killTree(cmd *exec.Cmd) {
 	exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
 	cmd.Process.Kill()
 }
+
+// ERROR_NOT_SAME_DEVICE: MoveFileEx cannot rename across volumes.
+func isCrossDevice(err error) bool { return err == syscall.Errno(17) }
