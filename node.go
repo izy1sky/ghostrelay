@@ -55,11 +55,13 @@ func runNode(args []string) {
 	maxJobTimeout := fs.Int("max-job-timeout", 6*3600, "max seconds a background job may run")
 	stateDir := fs.String("state-dir", "", "where job logs are kept (default: user cache dir/relay-node/<name>)")
 	probe := fs.String("probe", "git,python,python3,node,go,ffmpeg,docker", "commands to look up and report in node_info")
-	fs.Parse(args)
+	logFile := fs.String("log-file", "", "write the log to this file instead of stderr (used by relay service)")
+	settings := loadFlags(fs, args, defaultNodeConfig())
+	setupLog(*logFile, settings)
 
 	a := &nodeAgent{token: tokenFrom(*tok, "RELAY_NODE_TOKEN"), sem: make(chan struct{}, 8)}
 	if *serverURL == "" || a.token == "" {
-		log.Fatal("--server and RELAY_NODE_TOKEN (or --token) are required")
+		log.Fatal("--server and RELAY_NODE_TOKEN (or --token) are required; or set this machine up with: relay join <code>")
 	}
 	if len(roots) == 0 {
 		log.Fatal("at least one --root is required")

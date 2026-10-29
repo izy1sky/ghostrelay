@@ -1,0 +1,43 @@
+name: release
+
+# Push a tag like v0.6.0 to build and publish binaries for every platform.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: test
+        run: go test ./...
+      - name: build
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          mkdir dist
+          for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os=${t%/*} arch=${t#*/} exe=relay
+            [ "$os" = windows ] && exe=relay.exe
+            dir=relay_${v}_${os}_${arch}
+            mkdir -p "build/$dir"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$v" -o "build/$dir/$exe" .
+            cp README.md LICENSE "build/$dir/"
+            if [ "$os" = windows ]; then
+              (cd build && zip -qr "../dist/$dir.zip" "$dir")
+            else
+              tar -C build -czf "dist/$dir.tar.gz" "$dir"
+            fi
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes

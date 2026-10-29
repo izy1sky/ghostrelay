@@ -15,7 +15,8 @@ import (
 	"strings"
 )
 
-const version = "0.5.0"
+// version is set at release time with -ldflags "-X main.version=..."
+var version = "0.6.0-dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -27,6 +28,14 @@ func main() {
 		runServe(os.Args[2:])
 	case "node":
 		runNode(os.Args[2:])
+	case "init":
+		runInit(os.Args[2:])
+	case "invite":
+		runInvite(os.Args[2:])
+	case "join":
+		runJoin(os.Args[2:])
+	case "service":
+		runService(os.Args[2:])
 	case "token":
 		fmt.Println(newToken())
 	case "hash":
@@ -53,8 +62,12 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  relay serve [flags]   run the server   (relay serve -h)
-  relay node  [flags]   run a node       (relay node -h)
+  relay init            set up a server here: tokens, policy, join code
+  relay invite          print the join code and agent setup again
+  relay join <code>     set up this machine as a node  [--root DIR] [--allow-exec] [--install]
+  relay service ...     install | uninstall | status | logs   [node|server]
+  relay serve [flags]   run the server   (relay serve -h; no flags: settings from relay init)
+  relay node  [flags]   run a node       (relay node -h;  no flags: settings from relay join)
   relay token           print a random token
   relay hash            print sha256 of a token read from stdin (for policy agents)
   relay policy check    validate a policy file and test a call against it
