@@ -46,6 +46,17 @@ Wire details are in [PROTOCOL.md](PROTOCOL.md).
 Three commands, one per machine. Get `relay` for each OS from
 [Releases](../../releases) (or `go build -o relay .`).
 
+> **The release binaries aren't code-signed yet.** Downloaded through a
+> browser, the OS may refuse or warn the first time. To clear that once:
+> - **macOS:** `xattr -d com.apple.quarantine relay`, or System Settings →
+>   Privacy & Security → **Open Anyway**.
+> - **Windows:** `Unblock-File .\relay.exe` in PowerShell, or **More info →
+>   Run anyway** on the SmartScreen prompt.
+>
+> Downloads with `curl`, `wget` or `gh release download` don't need this, and
+> neither does the copy `relay service install` makes. Check a download
+> against `SHA256SUMS` on the release page.
+
 **1. Server** (a machine the others can reach):
 
 ```bash
