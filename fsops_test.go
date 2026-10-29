@@ -112,8 +112,13 @@ func TestRemoveRules(t *testing.T) {
 	if _, err := a.doRemove(RemoveArgs{Path: "d", Recursive: true}); err != nil {
 		t.Error(err)
 	}
-	if _, err := a.doRemove(RemoveArgs{Path: r, Recursive: true}); err == nil {
-		t.Error("removed the root")
+	for _, p := range []string{r, ".", "d/.."} {
+		if _, err := a.doRemove(RemoveArgs{Path: p, Recursive: true}); err == nil || !strings.Contains(err.Error(), "node root") {
+			t.Errorf("remove root %q: %v", p, err)
+		}
+	}
+	if _, err := a.doMove(MoveArgs{Src: ".", Dst: "elsewhere"}); err == nil || !strings.Contains(err.Error(), "node root") {
+		t.Errorf("move root: %v", err)
 	}
 	if _, err := a.doRemove(RemoveArgs{Path: "../x"}); err == nil {
 		t.Error("removed outside the root")

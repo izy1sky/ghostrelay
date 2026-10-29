@@ -75,6 +75,13 @@ func (a *nodeAgent) lexical(p string) (string, error) {
 		p = filepath.Join(a.roots[0], p)
 	}
 	p = filepath.Clean(p)
+	// A root itself (".", or the root as configured before symlinks were
+	// resolved) has no parent inside the roots; let the caller refuse it by name.
+	if full, err := a.resolve(p); err == nil && a.isRoot(full) {
+		if li, err := os.Lstat(p); err == nil && li.Mode()&fs.ModeSymlink == 0 {
+			return full, nil
+		}
+	}
 	parent, err := a.resolve(filepath.Dir(p))
 	if err != nil {
 		return "", err
