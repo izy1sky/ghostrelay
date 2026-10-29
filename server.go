@@ -49,7 +49,10 @@ func runServe(args []string) {
 	auditPath := fs.String("audit", "relay-audit.jsonl", "audit log file (JSON lines)")
 	adminTok := fs.String("admin-token", "", "token for approving calls (prefer env RELAY_ADMIN_TOKEN)")
 	policyPath := fs.String("policy", "", "policy file (JSON); reloaded when it changes. Without it every call is allowed")
-	fs.Parse(args)
+	pubURL := fs.String("url", "", "address nodes and agents use to reach this server (shown by relay invite)")
+	logFile := fs.String("log-file", "", "write the log to this file instead of stderr (used by relay service)")
+	settings := loadFlags(fs, args, defaultServerConfig())
+	setupLog(*logFile, settings)
 
 	s := &server{
 		nodeToken:  tokenFrom(*nodeTok, "RELAY_NODE_TOKEN"),
@@ -109,6 +112,9 @@ func runServe(args []string) {
 	if *certFile != "" || *keyFile != "" {
 		log.Printf("relay %s serving https on %s (nodes: /node, agents: /mcp)", version, *listen)
 		log.Fatal(srv.ListenAndServeTLS(*certFile, *keyFile))
+	}
+	if *pubURL != "" {
+		log.Printf("reachable as %s; print join codes with: relay invite", *pubURL)
 	}
 	log.Printf("relay %s serving PLAIN http on %s (nodes: /node, agents: /mcp)", version, *listen)
 	log.Printf("WARNING: no TLS; tokens travel in clear. Use --tls-cert/--tls-key, a TLS proxy, or a private network")

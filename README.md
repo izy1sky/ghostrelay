@@ -41,18 +41,70 @@ Host A (agent) ──MCP /mcp──► relay serve (public IP) ◄──WSS /nod
 
 Wire details are in [PROTOCOL.md](PROTOCOL.md).
 
+## Quick start
+
+Three commands, one per machine. Get `relay` for each OS from
+[Releases](../../releases) (or `go build -o relay .`).
+
+**1. Server** (a machine the others can reach):
+
+```bash
+relay init --url http://<this machine's address>:8787   # tokens, a policy, a join code
+relay serve                                            # or: relay service install server
+```
+
+`relay init` prints everything else you need: the join code, the Claude Code
+command, and where to approve calls. `relay invite` prints it again.
+
+**2. Each machine to share**, any OS:
+
+```bash
+relay join rj1_... --root ~/work --allow-exec --install
+```
+
+It checks the server and the code, saves its settings, and with `--install`
+keeps running as a service, also after reboots (launchd on macOS, a systemd
+user unit on Linux, a logon Scheduled Task on Windows; no admin rights).
+Without `--install` it runs in the terminal. `--root` is the folder agents may
+use; `--allow-exec` lets them run commands.
+
+**3. The agent's machine:** paste the `claude mcp add ...` line `relay init`
+printed. Then ask Claude, for example: "on node win, run `ffmpeg -version`".
+
+Day to day:
+
+| Command | Does |
+|---|---|
+| `relay service status` / `logs [-f]` / `uninstall` | check, follow or remove the node service (add `server` for the server's) |
+| `relay approvals`, `relay approve <id>`, `relay deny <id>` | decide calls the policy asks about (on the server, no setup needed) |
+| `relay invite` | the join code and agent command again |
+
+Settings live in `~/.relay` (`RELAY_HOME` moves it): `server/server.json`,
+`server/policy.json` and `node.json`. They hold tokens, so they are only
+readable by you. The keys are the flag names below, so anything a flag can
+set, the file can too; flags win over the file.
+
+The default policy (`relay init --policy ask`) lets agents look around
+freely, never lets them write to `.git`, `.env` or `.ssh`, and asks you about
+everything else. `--policy readonly` and `--policy open` are the other starting
+points.
+
 ## Build
 
 ```bash
 go build -o relay .
-GOOS=windows GOARCH=amd64 go build -o relay.exe .
-GOOS=linux GOARCH=amd64 go build -o relay-linux .
 go test ./...
+python3 tests/e2e.py ./relay     # init, serve, join, then the smoke test
 ```
 
-Prebuilt (not committed; build with the loop in git history or `go build`): `dist/relay-{darwin,linux}-{amd64,arm64}`, `dist/relay-windows-{amd64,arm64}.exe`.
+Releases: push a tag like `v0.6.0` and [the release workflow](.github/workflows/release.yml)
+builds archives for macOS, Linux and Windows (amd64 and arm64) with checksums.
+CI runs the unit and end-to-end tests on Linux and Windows for every push.
 
-## Run
+## Manual setup (flags)
+
+Everything `relay init` and `relay join` do can be done with flags, for
+scripts or containers.
 
 **1. Server** (public host). Generate three *different* tokens:
 
@@ -439,8 +491,7 @@ worth knowing (like how native programs print Chinese) without failing the run.
 3. **Custom tools:** nodes advertise their own tools (for example
    `win.ffmpeg_transcode`), re-exported over MCP. Policy already matches them
    by glob.
-4. **Windows service:** run the node at boot (`sc.exe create` or NSSM for now).
-5. **Job ownership:** let the policy limit `job_kill` / `job_logs` to the
+4. **Job ownership:** let the policy limit `job_kill` / `job_logs` to the
    agent that started the job.
 
 Other notes:

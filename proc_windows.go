@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"syscall"
+	"unsafe"
 )
 
 func setProcGroup(cmd *exec.Cmd) {
@@ -24,3 +25,20 @@ func killTree(cmd *exec.Cmd) {
 
 // ERROR_NOT_SAME_DEVICE: MoveFileEx cannot rename across volumes.
 func isCrossDevice(err error) bool { return err == syscall.Errno(17) }
+
+var (
+	kernel32              = syscall.NewLazyDLL("kernel32.dll")
+	procGetConsoleProcess = kernel32.NewProc("GetConsoleProcessList")
+	procFreeConsole       = kernel32.NewProc("FreeConsole")
+)
+
+// hideOwnConsole closes the console window when this process is the only one
+// using it, which is the case when Task Scheduler started it. Started from a
+// terminal, the shell shares the console, and it is left alone.
+func hideOwnConsole() {
+	var pids [2]uint32
+	n, _, _ := procGetConsoleProcess.Call(uintptr(unsafe.Pointer(&pids[0])), 2)
+	if n == 1 {
+		procFreeConsole.Call()
+	}
+}

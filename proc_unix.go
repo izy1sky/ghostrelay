@@ -20,3 +20,5 @@ func killTree(cmd *exec.Cmd) {
 }
 
 func isCrossDevice(err error) bool { return err == syscall.EXDEV }
+
+func hideOwnConsole() {}

@@ -3,7 +3,8 @@
 A walk-through you can follow on one machine in about 30 minutes. Every step
 says what to run and what you should see. Part 1 sets up the server and two
 nodes. Parts 2–9 test one feature each. Part 10 connects a real agent
-(Claude Code), and Part 11 adds a Windows or Linux machine.
+(Claude Code), Part 11 adds a Windows or Linux machine, and Part 12 tests
+the one-command setup (`relay init`, `relay join`, `relay service`).
 
 You need Go 1.24+, Python 3, and `curl`. Commands are for macOS or Linux
 (zsh or bash). Everything stays inside `~/relay-test`.
@@ -450,11 +451,98 @@ This setup sends tokens over plain HTTP, so keep it to a trusted LAN.
 
 ---
 
+## Part 12. One-command setup and services
+
+This part uses its own `RELAY_HOME` and port, so it doesn't touch Parts 1–11
+or your real `~/.relay`. Stop the server and nodes from Part 1 first, or keep
+them: nothing here uses port 8787.
+
+### 12.1 Set up a server
+
+```bash
+export RELAY_HOME=~/relay-test/home
+unset RELAY_NODE_TOKEN RELAY_AGENT_TOKEN RELAY_ADMIN_TOKEN RELAY_SERVER
+./relay init --listen 127.0.0.1:8790 --url http://127.0.0.1:8790
+```
+
+✅ It writes `~/relay-test/home/server/server.json` and `policy.json`, both
+`-rw-------`, and prints four numbered steps: `relay serve`, a
+`relay join rj1_...` line, a `claude mcp add` line, and the admin page.
+Running `relay init` again refuses: `already exists ... relay invite`.
+
+**Terminal 1:** `RELAY_HOME=~/relay-test/home ./relay serve` (no flags).
+
+✅ `settings from .../server.json`, `policy ...: 2 rules, default ask`, and
+`reachable as http://127.0.0.1:8790`.
+
+### 12.2 Join a node
+
+In terminal 4, copy the code from `./relay invite`, then try the mistakes first:
+
+| # | Run | Expect |
+|---|---|---|
+| 12.2a | `./relay join <code>` | `give at least one --root ...` |
+| 12.2b | `./relay join <code> --root ~/nope` | `--root ... is not a folder` |
+| 12.2c | `./relay join rj1_garbage --root ~/relay-test/a` | `join code is damaged ...` |
+| 12.2d | `./relay join <code> --root ~/relay-test/a --name mac --allow-exec` | `checking http://127.0.0.1:8790 ... ok`, `saved .../node.json`, then the node runs: `connected as "mac"` |
+
+Stop the server (Ctrl-C) and run 12.2d again. ✅ `cannot reach the server
+at ...`: nothing is saved. Start the server again.
+
+### 12.3 Use it with no environment variables
+
+With the node from 12.2d running, in another terminal:
+
+```bash
+export RELAY_HOME=~/relay-test/home
+AT=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/relay-test/home/server/server.json')))['agent-token'])")
+RELAY_SERVER=http://127.0.0.1:8790 RELAY_AGENT_TOKEN=$AT python3 tests/mcp.py exec '{"node":"mac","argv":["echo","hi"]}' &
+./relay approvals
+```
+
+✅ The call waits (`ask (default)`), and `relay approvals` lists it with no
+token or URL set: it reads them from the server's settings. `./relay approve
+<id>` lets it run. A write to `x/.git/config` is denied by the preset's rule 2.
+
+### 12.4 Run the node as a service
+
+Stop the foreground node (Ctrl-C), then:
+
+```bash
+./relay service install
+```
+
+✅ `installed ghostrelay-node-mac: running, pid N`, the settings and log
+paths, and the last log lines ending in `connected as "mac"`. Then:
+
+| # | Run | Expect |
+|---|---|---|
+| 12.4a | `./relay service status` | `ghostrelay-node-mac: running, pid N` |
+| 12.4b | `./relay service logs -n 5` | the node's last log lines |
+| 12.4c | `kill <pid>`, wait 10 s, `./relay service status` | running again, with a new pid (macOS restarts it within 10 s, Linux within 5 s, Windows within a minute) |
+| 12.4d | `ls ~/relay-test/home/bin` | a copy of `relay`: the service doesn't depend on the file you downloaded |
+| 12.4e | log out and back in (or reboot), then `./relay service status` | running |
+| 12.4f | `./relay service uninstall`, then `./relay service status` | `removed ghostrelay-node-mac ...`, then `not installed` |
+
+Where it lives: macOS `~/Library/LaunchAgents/dev.ghostrelay.node.mac.plist`;
+Linux `~/.config/systemd/user/ghostrelay-node-mac.service`; Windows Task
+Scheduler, task `ghostrelay-node-mac`. On Windows the console window flashes
+once at logon and closes; the node keeps running in the background.
+
+The server can be a service too: `./relay service install server` (and
+`status server`, `logs server`, `uninstall server`).
+
+**Unset `RELAY_HOME`** when you're done with this part, or later commands keep
+using the test settings.
+
+---
+
 ## Cleanup
 
 Ctrl-C the server and the nodes, then:
 
 ```bash
+./relay service uninstall 2>/dev/null; ./relay service uninstall server 2>/dev/null   # with RELAY_HOME still set, if you ran Part 12
 rm -rf ~/relay-test
 rm -f relay-audit.jsonl                      # in the folder you ran the server from
 claude mcp remove relay 2>/dev/null
