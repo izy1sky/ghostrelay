@@ -233,11 +233,11 @@ func (s *service) status() string {
 		}
 		return st
 	case "windows":
-		out, err := powershell(fmt.Sprintf("$t = Get-ScheduledTask -TaskName %s -ErrorAction Stop; $i = $t | Get-ScheduledTaskInfo; \"$($t.State), last result $($i.LastTaskResult)\"", psQuote(s.id)))
+		out, err := powershell(fmt.Sprintf("$t = Get-ScheduledTask -TaskName %s -ErrorAction Stop; $i = $t | Get-ScheduledTaskInfo; \"$($t.State) $($i.LastTaskResult)\"", psQuote(s.id)))
 		if err != nil {
 			return "not installed"
 		}
-		return strings.TrimSpace(out)
+		return taskState(strings.TrimSpace(out))
 	}
 	return "unknown"
 }
@@ -372,6 +372,23 @@ $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBat
 $p = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName %s -Action $a -Trigger $t -Settings $s -Principal $p -Description 'ghostrelay %s' -Force | Out-Null
 Start-ScheduledTask -TaskName %s`, psQuote(s.exe), psQuote(strings.Join(argv, " ")), psQuote(s.id), s.role, psQuote(s.id))
+}
+
+// taskState turns "Running 267009" (state, LastTaskResult) into words.
+// Task Scheduler reports its own SCHED_S_* codes as the last result.
+func taskState(out string) string {
+	state, code, _ := strings.Cut(out, " ")
+	switch code {
+	case "0", "":
+		return strings.ToLower(state)
+	case "267009": // 0x41301 SCHED_S_TASK_RUNNING
+		return strings.ToLower(state)
+	case "267011": // 0x41303 SCHED_S_TASK_HAS_NOT_RUN
+		return strings.ToLower(state) + " (has not run yet)"
+	case "267014": // 0x41306 SCHED_S_TASK_TERMINATED
+		return strings.ToLower(state) + " (last run was stopped)"
+	}
+	return fmt.Sprintf("%s (last exit code %s; see relay service logs)", strings.ToLower(state), code)
 }
 
 func psQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
