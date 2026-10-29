@@ -365,6 +365,10 @@ check a real host.
 
 ## Testing a node (any OS)
 
+For a full walk-through of every feature, with what each step should show,
+see [TESTING.md](TESTING.md). To make one tool call by hand, as an agent would:
+`python3 tests/mcp.py exec '{"node": "a", "argv": ["git", "--version"]}'`.
+
 `tests/node_smoke.py` runs on the agent machine. It asks the node what it is
 (`node_info`) and picks matching shell snippets: PowerShell on Windows, POSIX
 elsewhere. Everything else goes through the OS-neutral tools. It checks:
