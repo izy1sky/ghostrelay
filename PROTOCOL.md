@@ -1,4 +1,4 @@
-# relay wire protocol (v0.4)
+# relay wire protocol (v0.5)
 
 Three parties:
 
@@ -44,9 +44,10 @@ Every frame is one JSON text message:
 ### `info` (hello)
 
 ```json
-{"name": "win", "version": "0.4.0", "os": "windows", "arch": "amd64",
- "hostname": "DESKTOP-1", "shell": "C:\\...\\pwsh.exe",
- "roots": ["D:\\work"], "allow_exec": true,
+{"name": "win", "version": "0.5.0", "os": "windows", "arch": "amd64",
+ "hostname": "DESKTOP-1", "shell": "C:\\...\\pwsh.exe", "shell_kind": "powershell",
+ "path_sep": "\\", "roots": ["D:\\work"], "roots_case_insensitive": [true],
+ "allow_exec": true,
  "max_output": 262144, "max_timeout_sec": 600,
  "max_jobs": 16, "max_job_timeout_sec": 21600,
  "tools": {"git": "C:\\Program Files\\Git\\cmd\\git.exe"}}
@@ -56,12 +57,16 @@ Every frame is one JSON text message:
 
 | op         | args                                                  | result                                                                 |
 |------------|-------------------------------------------------------|------------------------------------------------------------------------|
-| `exec`     | `command`, `cwd?`, `timeout_sec?`, `owner`            | `exit_code`, `stdout`, `stderr`, `*_truncated`, `timed_out`, `duration_ms` |
+| `exec`     | `command` **or** `argv[]`, `cwd?`, `timeout_sec?`, `owner` | `exit_code`, `stdout`, `stderr`, `*_truncated`, `timed_out`, `duration_ms` |
 | `exec` + `background: true` | same                                 | job (below), returned at once                                          |
 | `job_logs` | `job_id`, `offset?` (bytes), `max_bytes?`, `tail?`, `wait_sec?` (≤ 60) | `job`, `data`, `offset`, `next_offset`, `more`             |
 | `job_kill` | `job_id`                                              | job                                                                    |
 | `jobs_list`| none                                                  | `jobs[]`                                                               |
-| `fs_stat`  | `path`                                                | `path` (resolved), `exists`, `dir`, `size`, `mode`                     |
+| `fs_stat`  | `path`, `sha256?`                                     | `path` (resolved), `exists`, `dir`, `symlink`, `size`, `mode`, `mod_time`, `sha256?` |
+| `fs_move`  | `src`, `dst`, `overwrite?`                            | stat of `dst`                                                          |
+| `fs_remove`| `path`, `recursive?`                                  | `removed`, `dir`, `symlink`                                            |
+| `fs_glob`  | `path?`, `pattern`, `max?`                            | `root`, `matches[]` (relative, `/`), `truncated`                       |
+| `fs_grep`  | `path?`, `pattern` (RE2), `glob?`, `ignore_case?`, `max?` | `root`, `matches[]` (`file`, `line`, `text`), `truncated`, `skipped_files` |
 | `fs_walk`  | `path`                                                | `root`, `entries[]` (`rel`, `dir`, `size`, `mode`), `skipped[]`        |
 | `fs_mkdir` | `path`                                                | stat of the directory                                                  |
 | `get_chunk`| `path`, `offset`, `length` (≤ 4 MiB)                  | `data` (base64), `eof`                                                 |
@@ -93,6 +98,22 @@ place. Uploads idle for 10 minutes are discarded, and records left by a
 crashed node process are cleaned up when it starts again. `fs_walk` never
 follows symlinks.
 
+### System probe and OS neutrality (v0.5)
+
+At startup the node fills `shell_kind` (`powershell` | `bash` | `sh`),
+`path_sep`, and `roots_case_insensitive`. The last is measured on each root:
+the node creates `.relay-case-probe-*` and stats its uppercase name. If the
+root is read-only, it falls back to the platform default.
+
+- `exec` with `argv` runs `argv[0]` (looked up on `PATH`) with exactly those
+  arguments and no shell. With `command`, it uses the node's shell. Exactly one
+  of the two is required.
+- `fs_remove` and `fs_move` resolve the parent directory through the jail but
+  act on the final element itself (`Lstat`), so a symlink is removed or moved
+  as a link and its target is never touched. Roots can't be removed or moved.
+- `fs_glob` and `fs_grep` walk without following symlinks. Glob matching folds
+  case when the root is case-insensitive.
+
 ## 2. Node-side enforcement (the node has the final say)
 
 The server can ask for anything; the node decides.
@@ -119,7 +140,8 @@ server-initiated stream, no sessions). Methods: `initialize`, `ping`,
 `tools/list`, `tools/call`.
 
 Tools: `nodes_list`, `node_info`, `exec`, `fs_read`, `fs_write`, `fs_edit`,
-`fs_list`, `job_logs`, `job_kill`, `jobs_list`, `transfer`. Every tool except
+`fs_list`, `fs_stat`, `fs_mkdir`, `fs_move`, `fs_remove`, `fs_glob`, `fs_grep`,
+`job_logs`, `job_kill`, `jobs_list`, `transfer`. Every tool except
 `nodes_list` and `transfer` (which takes `src_node` / `dst_node`) takes a
 required `node` argument;
 there is no implicit default node.
@@ -139,6 +161,11 @@ node (rule format: README.md). The result is one of:
 - `deny`: returned at once as a tool error (`isError: true`) naming the rule.
 - `ask`: the HTTP request stays open while a pending entry waits for a
   decision.
+
+Path rules fold case when the node reported the path's root as
+case-insensitive (platform default for nodes older than v0.5). `fs_move` is
+two requests (`src` and `dst`), and both must pass. For `argv` exec, `commands`
+regexes see the arguments joined with spaces, quoted where needed.
 
 `transfer` is evaluated as `fs_read` on every source file and `fs_write` on
 every destination file and directory. The strictest verdict wins (deny > ask >

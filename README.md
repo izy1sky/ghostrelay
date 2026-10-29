@@ -5,17 +5,23 @@ other hosts that have no public address. A policy on the server decides what
 each agent may do, and asks a human when it should.
 
 ```
-Host A (agent) ──MCP /mcp──► relay serve (public IP) ◄──WSS /node── relay node (Host B, Windows)
+Host A (agent) ──MCP /mcp──► relay serve (public IP) ◄──WSS /node── relay node (Host B: macOS / Linux / Windows)
                               │ policy → allow / ask / deny
                               └ /admin page + relay approve CLI
 ```
 
 - `relay serve` runs on the one machine with a reachable address.
 - `relay node` runs on each resource host and **dials out**. It needs no open port.
-- The agent adds the server as an MCP server and gets these tools:
-  `nodes_list`, `node_info`, `exec`, `fs_read`, `fs_write`, `fs_edit`, `fs_list`,
-  `transfer` (node-to-node copy), and for background jobs `job_logs`,
-  `job_kill`, `jobs_list`.
+- The agent adds the server as an MCP server and gets one set of tools that
+  works the same whatever OS a node runs (see
+  [One API for every OS](#one-api-for-every-os)):
+
+| Group | Tools |
+|---|---|
+| Discover | `nodes_list`, `node_info` |
+| Run | `exec` (`argv` = no shell, or `command` = the node's shell), `job_logs`, `job_kill`, `jobs_list` |
+| Files | `fs_read`, `fs_write`, `fs_edit`, `fs_list`, `fs_stat`, `fs_mkdir`, `fs_move`, `fs_remove`, `fs_glob`, `fs_grep` |
+| Between nodes | `transfer` |
 
 Wire details are in [PROTOCOL.md](PROTOCOL.md).
 
@@ -24,10 +30,11 @@ Wire details are in [PROTOCOL.md](PROTOCOL.md).
 ```bash
 go build -o relay .
 GOOS=windows GOARCH=amd64 go build -o relay.exe .
+GOOS=linux GOARCH=amd64 go build -o relay-linux .
 go test ./...
 ```
 
-Prebuilt: `dist/relay-{darwin-arm64,linux-amd64,windows-amd64.exe,windows-arm64.exe}`.
+Prebuilt (not committed; build with the loop in git history or `go build`): `dist/relay-{darwin,linux}-{amd64,arm64}`, `dist/relay-windows-{amd64,arm64}.exe`.
 
 ## Run
 
@@ -47,9 +54,15 @@ the open internet, because the tokens would travel in clear.
 Without `--policy`, every call from an authenticated agent is allowed, and the
 server prints a warning.
 
-**2. Node** (Windows host, PowerShell):
+**2. Node**, on each resource host, whatever its OS. The flags are the same everywhere.
+
+```bash
+# macOS / Linux
+RELAY_NODE_TOKEN=<node token> ./relay node --server https://your-server:8787 --name box --root ~/work --allow-exec
+```
 
 ```powershell
+# Windows (PowerShell)
 $env:RELAY_NODE_TOKEN = "<node token>"
 .\relay.exe node --server https://your-server:8787 --name win --root D:\work --allow-exec
 ```
@@ -72,6 +85,52 @@ claude mcp add --transport http relay https://your-server:8787/mcp --header "Aut
 ```
 
 Then ask, for example: "on node win, run `ffmpeg -version`".
+
+## One API for every OS
+
+The agent shouldn't have to guess what a node is, and shouldn't need a
+different tool per OS. So:
+
+**1. The node probes its system at startup, and reports it in `node_info`.**
+
+| Field | Example | How it's found |
+|---|---|---|
+| `os`, `arch` | `windows`, `amd64` | the binary's platform |
+| `shell`, `shell_kind` | `C:\...\pwsh.exe`, `powershell` | `pwsh` → `powershell` on Windows; `bash` → `sh` elsewhere |
+| `path_sep` | `\` | the platform |
+| `roots_case_insensitive` | `[true]` | **asked of each root's filesystem**: create a lowercase file, look it up in uppercase |
+| `tools` | `{"git": "...", "ffmpeg": "..."}` | looked up on `PATH` (`--probe`) |
+
+Case sensitivity is probed rather than guessed, because the OS doesn't decide
+it. macOS volumes are usually case-insensitive but can be case-sensitive. Linux
+is usually case-sensitive but can use ext4 casefold. Windows can turn on case
+sensitivity per directory.
+
+**2. File tools behave the same everywhere.** `fs_*` and `transfer`:
+- accept forward slashes on every OS (Windows also takes `\`)
+- return paths in the node's own form
+- handle CRLF files on edit
+- follow the filesystem's case rules in `fs_glob`
+- never follow a symlink when removing or moving one
+
+`fs_stat(sha256=true)` hashes a file, to compare copies across nodes without
+`shasum` vs `Get-FileHash`. Use these instead of `rm`/`del`, `mkdir`, `mv`,
+`find` or `grep`, and the same call works on any node.
+
+**3. `exec` has two modes.**
+- `argv: ["git", "status", "--short"]` runs the program directly. There's no
+  shell and no quoting rules, the exit code is the program's own, and it
+  behaves the same on all three OSes. Prefer it.
+- `command: "..."` is a command line for the node's shell. Check
+  `node_info.shell_kind` and write PowerShell or POSIX syntax to match.
+
+**4. Policy follows the filesystem, not the OS name.** Path rules compare
+case-insensitively exactly where the node reported that root as
+case-insensitive. A `**/.git/**` deny catches `.GIT` on a normal Mac volume or
+on Windows, and leaves a genuinely separate `.GIT` directory alone on a
+case-sensitive Linux disk. Nodes older than v0.5 don't report it, so the
+server falls back to the platform default for them (Windows and macOS:
+insensitive).
 
 ## Background jobs
 
@@ -179,13 +238,14 @@ out matches anything.
 | `agents` | agent name: `default` (RELAY_AGENT_TOKEN) or a name from `agents` | glob |
 | `nodes` | node name | glob |
 | `tools` | tool name (unknown names are rejected, to catch typos) | glob |
-| `paths` | `path` for fs tools, `cwd` for exec, made absolute against the node's first root | glob: `*` one segment, `**` any depth, `/**` at the end includes the dir itself |
-| `commands` | exec command line | Go regexp, any match |
+| `paths` | `path` for fs tools (both `src` and `dst` for `fs_move`), `cwd` for exec, made absolute against the node's first root | glob: `*` one segment, `**` any depth, `/**` at the end includes the dir itself |
+| `commands` | exec command line; for `argv`, the arguments joined with spaces (quoted where needed), so `^git\b` matches both forms | Go regexp, any match |
 
 - **Actions:** `allow`; `deny` (the agent sees the rule number and `reason`);
   `ask` (the call waits for a human, up to `approval_timeout_sec`, then is refused).
-- **Windows nodes:** paths use `/` or `\` and are compared case-insensitively.
-  `..` can't climb past the drive.
+- **Case:** path rules compare case-insensitively where the node probed that
+  root as case-insensitive (see [One API for every OS](#one-api-for-every-os)).
+- **Windows paths:** `/` or `\`, and `..` can't climb past the drive.
 - **Named agents:** give each agent machine its own token, and list only its
   sha256 in the policy. Then rules can treat your Mac differently from a CI box.
 - **Hot reload:** the file is re-read within 2 s of a change. An invalid edit is
@@ -236,8 +296,8 @@ Things to keep in mind:
   with everything else on `ask`, over trying to deny the bad cases.
 - **The policy matches paths as text.** The server doesn't follow symlinks on
   the node; the node's jail does. Keep path rules inside the node's roots.
-- **Run the node as a dedicated low-privilege Windows user**, ideally inside a
-  VM you can snapshot.
+- **Run the node as a dedicated low-privilege user** (on any OS), ideally
+  inside a VM you can snapshot.
 
 ## Tested (macOS; server, node and agent on one machine)
 
@@ -281,19 +341,41 @@ Things to keep in mind:
   - a real headless Claude Code agent copying a directory and then running a
     script from the copy
 
-**Not yet tested on a real Windows host.** The Windows binary builds and passes
-`go vet`. The job and transfer unit tests are Unix-only.
+- **v0.5:** unit tests for:
+  - the case probe against the real filesystem, and shell-kind detection
+  - `argv` exec: verbatim arguments, exit codes, missing programs
+  - `fs_remove` on a symlink keeping its target, and refusing roots,
+    non-empty dirs and escapes
+  - `fs_move`, including case-only renames
+  - `fs_glob` / `fs_grep`, skipping binaries and handling CRLF
+  - `fs_stat` hashing
+  - policy case folding per probed root, including an old node falling back
+  - `fs_move` checking both paths
 
-## Testing a Windows node
+  Live: `tests/node_smoke.py` passed 24 of 24 on a normal macOS volume, and
+  again with the node's root on a **case-sensitive APFS volume** (Linux-like).
+  That run included transfers between the two kinds of volume. The live
+  policy check denied `repo/.GIT/config` on the case-insensitive node and
+  allowed it on the case-sensitive one.
 
-`tests/win_smoke.py` runs on the Mac and checks what only a real Windows host
-can show:
-- PowerShell exec, UTF-8 output, exit codes, stderr
-- tree kill via `taskkill`
-- `cwd` with spaces and Chinese
-- the jail on `C:\` paths, backslash and mixed-case paths, CRLF edits
+**Not yet tested on a real Windows or Linux host.** Both binaries build and
+pass `go vet` (Linux shares the Unix code paths tested on macOS). The job,
+transfer and symlink unit tests are Unix-only. `tests/node_smoke.py` is how to
+check a real host.
+
+## Testing a node (any OS)
+
+`tests/node_smoke.py` runs on the agent machine. It asks the node what it is
+(`node_info`) and picks matching shell snippets: PowerShell on Windows, POSIX
+elsewhere. Everything else goes through the OS-neutral tools. It checks:
+- the system probe against reality: a mixed-case read must succeed exactly
+  when the root was reported case-insensitive
+- `argv` and shell exec: UTF-8, exit codes, stderr, tree kill on timeout,
+  `cwd` with spaces and Chinese
+- the jail
+- every `fs_*` tool, including CRLF edits checked by sha256
 - background jobs and `job_kill`
-- transfers in both directions, with Chinese file names
+- with `--peer`, transfers in both directions with sha256 comparison
 
 It needs no policy on the server.
 
@@ -307,21 +389,26 @@ It needs no policy on the server.
    ```bash
    mkdir -p ~/relay-test && ./relay node --server http://127.0.0.1:8787 --name mac --root ~/relay-test --allow-exec
    ```
-3. **Windows, PowerShell:** copy `dist/relay-windows-amd64.exe` over. Use the
-   arm64 build if `$env:PROCESSOR_ARCHITECTURE` says ARM64. Then:
+3. **The host under test**, with the binary for its platform from `dist/`:
    ```powershell
-   mkdir C:\relay-test -Force
-   Unblock-File .\relay-windows-amd64.exe
+   # Windows (use the arm64 build if $env:PROCESSOR_ARCHITECTURE says ARM64)
+   mkdir C:\relay-test -Force; Unblock-File .\relay-windows-amd64.exe
    $env:RELAY_NODE_TOKEN = "<token from step 1>"
    .\relay-windows-amd64.exe node --server http://<mac ip>:8787 --name win --root C:\relay-test --allow-exec
    ```
-4. **Mac, terminal 3:**
    ```bash
-   RELAY_AGENT_TOKEN=<agent token> python3 tests/win_smoke.py --mac-root ~/relay-test
+   # Linux
+   mkdir -p ~/relay-test && chmod +x relay-linux-amd64
+   RELAY_NODE_TOKEN=<token from step 1> ./relay-linux-amd64 node --server http://<mac ip>:8787 --name linux --root ~/relay-test --allow-exec
+   ```
+4. **Mac, terminal 3:** test it, using the Mac node as the transfer peer:
+   ```bash
+   RELAY_AGENT_TOKEN=<agent token> python3 tests/node_smoke.py --node win --peer mac
    ```
 
 This uses plain HTTP, so keep it to a trusted LAN. macOS may ask whether
-`relay` may accept incoming connections: allow it. INFO lines report behavior
+`relay` may accept incoming connections: allow it. The Mac node can be tested
+the same way (`--node mac`). INFO lines report behavior
 worth knowing (like how native programs print Chinese) without failing the run.
 
 ## Next steps
@@ -337,8 +424,8 @@ worth knowing (like how native programs print Chinese) without failing the run.
    agent that started the job.
 
 Other notes:
-- On Windows, `exec`'s exit code follows PowerShell rules. Native programs
-  report their real exit code. A failed cmdlet with no `exit` statement reports
-  1 or 0.
+- On Windows, a `command`'s exit code follows PowerShell rules. A failed
+  cmdlet with no `exit` statement reports 1 or 0. Use `argv` when the exact
+  exit code matters.
 - A command that leaves a background child holding its output gets its reply
   about 2 s late.

@@ -77,7 +77,7 @@ type policy struct {
 // policyReq is one tool call reduced to what rules can match on.
 type policyReq struct {
 	Agent, Node, Tool string
-	Windows           bool
+	FoldCase          bool // path is on a case-insensitive filesystem
 	HasPath           bool
 	Path              string // normalized: absolute, forward slashes, cleaned
 	HasCommand        bool
@@ -267,7 +267,7 @@ func (r *rule) matches(q policyReq) bool {
 	}
 	if len(r.pathsCS) > 0 {
 		paths := r.pathsCS
-		if q.Windows {
+		if q.FoldCase {
 			paths = r.pathsCI
 		}
 		if !q.HasPath || !anyMatch(paths, q.Path) {
@@ -332,26 +332,65 @@ func normPath(p string, info NodeInfo) string {
 	return path.Clean(p)
 }
 
-func buildReq(agent, tool string, raw json.RawMessage, nc *nodeConn) policyReq {
+// foldsCase reports whether a normalized path sits on a case-insensitive
+// filesystem, using what the node probed for each root. Nodes older than
+// v0.5 did not probe, so fall back to the platform default there.
+func foldsCase(info NodeInfo, p string) bool {
+	if len(info.RootsCaseInsensitive) != len(info.Roots) || len(info.Roots) == 0 {
+		return info.OS == "windows" || info.OS == "darwin"
+	}
+	for i, r := range info.Roots {
+		root := normPath(r, info)
+		if strings.EqualFold(p, root) || len(p) > len(root) && strings.EqualFold(p[:len(root)+1], root+"/") {
+			return info.RootsCaseInsensitive[i]
+		}
+	}
+	return info.RootsCaseInsensitive[0]
+}
+
+// pathTools take a single "path" argument that policy path rules match on.
+var pathTools = []string{"fs_read", "fs_write", "fs_edit", "fs_list", "fs_stat", "fs_mkdir", "fs_remove", "fs_glob", "fs_grep"}
+
+// buildReqs reduces one tool call to what rules match on. Most calls are one
+// request; fs_move is two (its source and its destination), both of which
+// must pass.
+func buildReqs(agent, tool string, raw json.RawMessage, nc *nodeConn) []policyReq {
 	q := policyReq{Agent: agent, Tool: tool}
 	if nc == nil {
-		return q
+		return []policyReq{q}
 	}
-	q.Node, q.Windows = nc.info.Name, nc.info.OS == "windows"
+	q.Node = nc.info.Name
 	var a struct {
-		Path    string `json:"path"`
-		Cwd     string `json:"cwd"`
-		Command string `json:"command"`
+		Path    string   `json:"path"`
+		Cwd     string   `json:"cwd"`
+		Command string   `json:"command"`
+		Argv    []string `json:"argv"`
+		Src     string   `json:"src"`
+		Dst     string   `json:"dst"`
 	}
 	json.Unmarshal(raw, &a)
-	switch tool {
-	case "exec":
-		q.HasCommand, q.Command = true, a.Command
-		q.HasPath, q.Path = true, normPath(a.Cwd, nc.info)
-	case "fs_read", "fs_write", "fs_edit", "fs_list":
-		q.HasPath, q.Path = true, normPath(a.Path, nc.info)
+	withPath := func(q policyReq, p string) policyReq {
+		q.HasPath, q.Path = true, normPath(p, nc.info)
+		q.FoldCase = foldsCase(nc.info, q.Path)
+		return q
 	}
-	return q
+	switch {
+	case tool == "exec":
+		q.HasCommand, q.Command = true, a.Command
+		if len(a.Argv) > 0 {
+			q.Command = argvString(a.Argv)
+		}
+		return []policyReq{withPath(q, a.Cwd)}
+	case tool == "fs_move":
+		return []policyReq{withPath(q, a.Src), withPath(q, a.Dst)}
+	case slices.Contains(pathTools, tool):
+		return []policyReq{withPath(q, a.Path)}
+	}
+	return []policyReq{q}
+}
+
+func buildReq(agent, tool string, raw json.RawMessage, nc *nodeConn) policyReq {
+	return buildReqs(agent, tool, raw, nc)[0]
 }
 
 func (q policyReq) summary() string {

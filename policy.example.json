@@ -9,12 +9,12 @@
   "rules": [
     {
       "comment": "Looking around is always fine.",
-      "tools": ["nodes_list", "node_info", "fs_read", "fs_list", "job_logs", "jobs_list", "job_kill"],
+      "tools": ["nodes_list", "node_info", "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "job_logs", "jobs_list", "job_kill"],
       "action": "allow"
     },
     {
-      "comment": "Never touch secrets or git internals, even with approval.",
-      "tools": ["fs_write", "fs_edit"],
+      "comment": "Never touch secrets or git internals, even with approval. Case follows each node's filesystem, so .GIT counts where the disk ignores case.",
+      "tools": ["fs_write", "fs_edit", "fs_move", "fs_remove"],
       "paths": ["**/.git/**", "**/*.env", "**/.ssh/**"],
       "action": "deny",
       "reason": "secrets and git internals are off limits"
@@ -34,16 +34,16 @@
       "action": "allow"
     },
     {
-      "comment": "The mac agent may edit inside the work folder.",
+      "comment": "The mac agent may edit, create folders and move files inside the work folder.",
       "agents": ["mac"],
       "nodes": ["win"],
-      "tools": ["fs_write", "fs_edit"],
+      "tools": ["fs_write", "fs_edit", "fs_mkdir", "fs_move"],
       "paths": ["D:/work/**"],
       "action": "allow"
     },
     {
-      "comment": "Anything else that writes or runs: ask.",
-      "tools": ["exec", "fs_write", "fs_edit"],
+      "comment": "Anything else that writes, deletes or runs: ask.",
+      "tools": ["exec", "fs_write", "fs_edit", "fs_mkdir", "fs_move", "fs_remove"],
       "action": "ask"
     }
   ]
