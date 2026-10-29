@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: vet
+        run: go vet ./...
+      - name: unit tests
+        run: go test ./...
+      - name: build
+        run: go build -o relay${{ runner.os == 'Windows' && '.exe' || '' }} .
+      - name: end to end (init, serve, join, smoke test)
+        run: python tests/e2e.py ./relay${{ runner.os == 'Windows' && '.exe' || '' }}
+
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build every release target
+        run: |
+          for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -o /dev/null . && echo "ok $t"
+          done
+
+  # Installs the node as a real service on the runner, then removes it.
+  # Informational for now: CI runners are not normal desktops (no logged-in
+  # user on Windows, no user systemd session on Linux by default).
+  service:
+    name: service install (${{ matrix.os }})
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: user systemd session
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          sleep 2
+      - name: init, join --install, check, uninstall
+        shell: bash
+        run: |
+          set -x
+          go build -o relay .
+          ./relay init --listen 127.0.0.1:8787 --url http://127.0.0.1:8787 --policy open
+          ./relay serve > serve.log 2>&1 &
+          sleep 2
+          mkdir -p share
+          code=$(./relay invite | grep -o 'rj1_[A-Za-z0-9_-]*')
+          ./relay join "$code" --name ci --root "$PWD/share" --install
+          sleep 5
+          ./relay service status
+          ./relay service logs -n 20
+          grep -q '"node":"ci"' serve.log && echo "NODE CONNECTED THROUGH THE SERVICE"
+          ./relay service uninstall

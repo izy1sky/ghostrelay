@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -274,13 +275,26 @@ func serverFromEnv(v string) string {
 	if e := os.Getenv("RELAY_SERVER"); e != "" {
 		return strings.TrimRight(e, "/")
 	}
+	// On the server's own machine, relay init's settings know the port.
+	if cfg, err := readJSONMap(defaultServerConfig()); err == nil {
+		if listen, _ := cfg["listen"].(string); listen != "" {
+			if _, port, err := net.SplitHostPort(listen); err == nil {
+				return "http://127.0.0.1:" + port
+			}
+		}
+	}
 	return "http://127.0.0.1:8787"
 }
 
 func adminRequest(method, url string, body any) ([]byte, error) {
 	tok := strings.TrimSpace(os.Getenv("RELAY_ADMIN_TOKEN"))
 	if tok == "" {
-		return nil, errors.New("set RELAY_ADMIN_TOKEN")
+		if cfg, err := readJSONMap(defaultServerConfig()); err == nil {
+			tok, _ = cfg["admin-token"].(string)
+		}
+	}
+	if tok == "" {
+		return nil, errors.New("set RELAY_ADMIN_TOKEN (or run this on the server, after relay init)")
 	}
 	var rd io.Reader
 	if body != nil {
