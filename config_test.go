@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,10 @@ import (
 func TestApplyConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "node.json")
-	os.WriteFile(cfg, []byte(`{"#": "comment", "server": "http://s:1", "name": "box",
-		"root": ["work", "/abs"], "allow-exec": true, "max-jobs": 4}`), 0o600)
+	abs := filepath.Join(t.TempDir(), "abs") // absolute on every OS, unlike "/abs" on Windows
+	b, _ := json.Marshal(map[string]any{"#": "comment", "server": "http://s:1", "name": "box",
+		"root": []string{"work", abs}, "allow-exec": true, "max-jobs": 4})
+	os.WriteFile(cfg, b, 0o600)
 
 	fs := flag.NewFlagSet("node", flag.ContinueOnError)
 	server := fs.String("server", "", "")
@@ -30,7 +33,7 @@ func TestApplyConfig(t *testing.T) {
 	if *server != "http://s:1" || *name != "cli" || !*exec || *jobs != 4 {
 		t.Errorf("got server=%q name=%q exec=%v jobs=%d (the command line must win over the file)", *server, *name, *exec, *jobs)
 	}
-	if len(roots) != 2 || roots[0] != filepath.Join(dir, "work") || roots[1] != "/abs" {
+	if len(roots) != 2 || roots[0] != filepath.Join(dir, "work") || roots[1] != abs {
 		t.Errorf("roots = %v; relative ones resolve against the file's folder", roots)
 	}
 

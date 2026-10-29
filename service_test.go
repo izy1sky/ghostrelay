@@ -75,3 +75,16 @@ func TestTaskScript(t *testing.T) {
 		t.Errorf("script:\n%s", sc)
 	}
 }
+
+func TestTaskState(t *testing.T) {
+	for in, want := range map[string]string{
+		"Running 267009": "running",
+		"Ready 0":        "ready",
+		"Ready 267011":   "ready (has not run yet)",
+		"Ready 1":        "ready (last exit code 1; see relay service logs)",
+	} {
+		if got := taskState(in); got != want {
+			t.Errorf("taskState(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
