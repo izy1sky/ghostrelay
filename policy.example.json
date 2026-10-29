@@ -1,0 +1,50 @@
+{
+  "comment": "Rules are checked top to bottom; the first match wins. Omitted matchers match anything. Edit freely: the server reloads this file within 2 seconds, and keeps the old policy if the new one is invalid (check with: relay policy check --policy policy.json). The transfer tool is checked as fs_read of every source file plus fs_write of every destination file.",
+  "default": "deny",
+  "approval_timeout_sec": 300,
+  "notify": {"kind": "json", "url": ""},
+  "agents": [
+    {"name": "mac", "token_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "comment": "replace with: echo $TOKEN | relay hash"}
+  ],
+  "rules": [
+    {
+      "comment": "Looking around is always fine.",
+      "tools": ["nodes_list", "node_info", "fs_read", "fs_list", "job_logs", "jobs_list", "job_kill"],
+      "action": "allow"
+    },
+    {
+      "comment": "Never touch secrets or git internals, even with approval.",
+      "tools": ["fs_write", "fs_edit"],
+      "paths": ["**/.git/**", "**/*.env", "**/.ssh/**"],
+      "action": "deny",
+      "reason": "secrets and git internals are off limits"
+    },
+    {
+      "comment": "Destructive-looking commands need a human. A seatbelt, not a wall: regexes are easy to get around.",
+      "tools": ["exec"],
+      "commands": ["(?i)\\b(rm|rmdir|del|erase|Remove-Item|rd|format|shutdown|Restart-Computer|Stop-Computer|reg|Set-ExecutionPolicy|curl|wget|Invoke-WebRequest|iwr)\\b"],
+      "action": "ask"
+    },
+    {
+      "comment": "Everyday commands on the Windows box, inside the work folder.",
+      "nodes": ["win"],
+      "tools": ["exec"],
+      "paths": ["D:/work/**"],
+      "commands": ["^(git|python|py|ffmpeg|dotnet|npm|node|pwsh|dir|ls|Get-ChildItem|Get-Content|cat|type|echo|where|Get-Command)\\b"],
+      "action": "allow"
+    },
+    {
+      "comment": "The mac agent may edit inside the work folder.",
+      "agents": ["mac"],
+      "nodes": ["win"],
+      "tools": ["fs_write", "fs_edit"],
+      "paths": ["D:/work/**"],
+      "action": "allow"
+    },
+    {
+      "comment": "Anything else that writes or runs: ask.",
+      "tools": ["exec", "fs_write", "fs_edit"],
+      "action": "ask"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+# relay wire protocol (v0.4)
+
+Three parties:
+
+- **server** (`relay serve`): the only host with a reachable address.
+- **node** (`relay node`): a resource host. Dials out to the server; never listens.
+- **agent**: any MCP client (Claude Code etc.). Talks MCP to the server.
+
+```
+agent ──HTTP POST /mcp (Bearer AGENT_TOKEN)──► server ◄──WSS /node (Bearer NODE_TOKEN)── node
+```
+
+The two tokens are separate on purpose: an agent token cannot register a node,
+and a node token cannot call tools.
+
+## 1. Node link: `GET /node` (WebSocket)
+
+Auth: `Authorization: Bearer <NODE_TOKEN>` on the upgrade request. A wrong
+token is rejected with 401 before the upgrade.
+
+Every frame is one JSON text message:
+
+```json
+{"type": "...", "id": "...", "op": "...", "args": {}, "result": {}, "error": "", "info": {}}
+```
+
+| type      | direction      | fields                | meaning                                       |
+|-----------|----------------|-----------------------|-----------------------------------------------|
+| `hello`   | node → server  | `info`                | first frame; registers the node               |
+| `welcome` | server → node  |                       | registration accepted                         |
+| `req`     | server → node  | `id`, `op`, `args`    | run an operation                              |
+| `res`     | node → server  | `id`, `result`/`error`| reply to `req` with the same `id`             |
+| `cancel`  | server → node  | `id`                  | the caller gave up; stop the running `req`    |
+
+- `id` is chosen by the server and unique per connection. Many `req`s can be in
+  flight at once; replies may arrive in any order.
+- If a second node registers with a name that is already connected, the old
+  connection is closed and replaced (this is the reconnect path).
+- Both sides send WebSocket pings every 20 s; a missed pong closes the link.
+  The node reconnects with exponential backoff (1 s → 30 s).
+- When the link drops, the node cancels every in-flight `req` (including a
+  foreground `exec`). Background jobs are not requests and keep running.
+
+### `info` (hello)
+
+```json
+{"name": "win", "version": "0.4.0", "os": "windows", "arch": "amd64",
+ "hostname": "DESKTOP-1", "shell": "C:\\...\\pwsh.exe",
+ "roots": ["D:\\work"], "allow_exec": true,
+ "max_output": 262144, "max_timeout_sec": 600,
+ "max_jobs": 16, "max_job_timeout_sec": 21600,
+ "tools": {"git": "C:\\Program Files\\Git\\cmd\\git.exe"}}
+```
+
+### Operations
+
+| op         | args                                                  | result                                                                 |
+|------------|-------------------------------------------------------|------------------------------------------------------------------------|
+| `exec`     | `command`, `cwd?`, `timeout_sec?`, `owner`            | `exit_code`, `stdout`, `stderr`, `*_truncated`, `timed_out`, `duration_ms` |
+| `exec` + `background: true` | same                                 | job (below), returned at once                                          |
+| `job_logs` | `job_id`, `offset?` (bytes), `max_bytes?`, `tail?`, `wait_sec?` (≤ 60) | `job`, `data`, `offset`, `next_offset`, `more`             |
+| `job_kill` | `job_id`                                              | job                                                                    |
+| `jobs_list`| none                                                  | `jobs[]`                                                               |
+| `fs_stat`  | `path`                                                | `path` (resolved), `exists`, `dir`, `size`, `mode`                     |
+| `fs_walk`  | `path`                                                | `root`, `entries[]` (`rel`, `dir`, `size`, `mode`), `skipped[]`        |
+| `fs_mkdir` | `path`                                                | stat of the directory                                                  |
+| `get_chunk`| `path`, `offset`, `length` (≤ 4 MiB)                  | `data` (base64), `eof`                                                 |
+| `put_open` | `path`, `mode?`, `overwrite?`                         | `upload_id`, `path`                                                    |
+| `put_chunk`| `upload_id`, `offset` (must equal bytes written), `data` | `written`                                                           |
+| `put_close`| `upload_id`, `sha256`                                 | `path`, `bytes`, `sha256`; a mismatch discards the upload              |
+| `put_abort`| `upload_id`                                           | `aborted`                                                              |
+| `fs_read`  | `path`, `offset?` (1-based line), `limit?` (lines)    | `path`, `content`, `start_line`, `total_lines`, `truncated`, `crlf`    |
+| `fs_write` | `path`, `content`                                     | `path`, `bytes`                                                        |
+| `fs_edit`  | `path`, `old_string`, `new_string`, `replace_all?`    | `path`, `replacements`                                                 |
+| `fs_list`  | `path?`                                               | `path`, `entries[]` (`name`, `dir`, `size`, `mod_time`), `truncated`   |
+
+A job is `{id, command, cwd, owner, pid, state, exit_code?, started, ended?,
+duration_ms, output_bytes}`. `state` is `running`, `exited`, `killed` or
+`timed_out`. `owner` is always set by the server to the calling agent's
+name; whatever the agent sends is overwritten.
+
+Jobs belong to the node process, not to a link. stdout and stderr go,
+interleaved, straight into `<state-dir>/jobs/<id>.log`. `job_logs` reads that
+file by byte offset, and never splits a UTF-8 character across chunks. With
+`wait_sec` it returns as soon as there is new data or the job ends. Finished
+jobs are kept for 24 h, at most 50. A node restart clears the job directory.
+
+Transfer ops are internal: the server drives them for the `transfer` tool;
+they are not MCP tools. `put_open` creates `.relay-up-*` next to the target and
+records it under `<state-dir>/uploads/`. `put_close` verifies size and sha256,
+fsyncs, applies the mode bits (not on Windows), and renames the file into
+place. Uploads idle for 10 minutes are discarded, and records left by a
+crashed node process are cleaned up when it starts again. `fs_walk` never
+follows symlinks.
+
+## 2. Node-side enforcement (the node has the final say)
+
+The server can ask for anything; the node decides.
+
+- **fs jail:** every path (and `exec`'s `cwd`) is made absolute, symlinks are
+  resolved, and it must fall inside one of the `--root` directories. Relative
+  paths are relative to the first root.
+- **exec is off by default.** It needs `--allow-exec`. Once on, a command can do
+  whatever the node's OS user can do. The jail only constrains `cwd`. The real
+  boundary for `exec` is the OS account (and the VM) the node runs as.
+- Output is capped at `max_output` bytes per stream. The timeout is capped at
+  `max_timeout_sec`. On timeout or cancel the whole process tree is killed.
+- Commands run without a TTY; stdin is empty.
+- Windows: commands run in PowerShell (pwsh if installed, otherwise Windows
+  PowerShell) with UTF-8 output forced.
+
+## 3. Agent face: `POST /mcp` (MCP streamable HTTP)
+
+Auth: `Authorization: Bearer <AGENT_TOKEN>`.
+
+Minimal streamable-HTTP server: one JSON-RPC message per POST, answered with
+`application/json`. Notifications get `202`. `GET`/`DELETE` return `405` (no
+server-initiated stream, no sessions). Methods: `initialize`, `ping`,
+`tools/list`, `tools/call`.
+
+Tools: `nodes_list`, `node_info`, `exec`, `fs_read`, `fs_write`, `fs_edit`,
+`fs_list`, `job_logs`, `job_kill`, `jobs_list`, `transfer`. Every tool except
+`nodes_list` and `transfer` (which takes `src_node` / `dst_node`) takes a
+required `node` argument;
+there is no implicit default node.
+
+### Agent identity
+
+The bearer token picks the agent name that policy rules match on:
+`RELAY_AGENT_TOKEN` is `default`, and any token whose sha256 appears in the
+policy's `agents` list takes that agent's name. Anything else gets a 401.
+
+## 4. Policy and approvals (v0.2)
+
+Every `tools/call` is checked against the policy before anything is sent to a
+node (rule format: README.md). The result is one of:
+
+- `allow`: forwarded.
+- `deny`: returned at once as a tool error (`isError: true`) naming the rule.
+- `ask`: the HTTP request stays open while a pending entry waits for a
+  decision.
+
+`transfer` is evaluated as `fs_read` on every source file and `fs_write` on
+every destination file and directory. The strictest verdict wins (deny > ask >
+allow), with one approval for the whole transfer. A timeout or a deny returns a tool error. The approval wait is not
+  counted against `exec`'s own timeout.
+
+Admin endpoints, all with `Authorization: Bearer <ADMIN_TOKEN>`:
+
+| Method + path              | Body / result                                                       |
+|----------------------------|---------------------------------------------------------------------|
+| `GET /admin/api/pending`   | `[{id, agent, node, tool, command?, path?, verdict, reason?, created, expires}]` |
+| `POST /admin/api/decide`   | `{"id", "decision": "allow" \| "always" \| "deny", "reason"?, "by"?}` → `ok`, or 404 if already gone |
+| `GET /admin/`              | the approval page; it needs no token to load, but asks for one before showing data |
+
+## 5. Audit
+
+The server appends one JSON line per event to `--audit` (default
+`relay-audit.jsonl`):
+- node connect and disconnect
+- auth failures (node, agent, admin)
+- every tool call: agent, remote address, node, arguments (long strings
+  shortened), policy decision, result status, duration
+- approval requested / decided (by whom, and why) / timed out / abandoned
+- policy reloaded / reload failed
+
+## Planned
+
+mTLS node enrollment · background / resumable transfers · node-advertised
+custom tools · job ownership in policy.
