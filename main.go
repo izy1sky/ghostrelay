@@ -1,6 +1,7 @@
 // Command relay connects resource hosts (nodes) to a central server that
 // exposes their files and shells to agents as MCP tools.
 //
+//	relay         open the setup page in a browser (same as relay ui)
 //	relay serve   run the server (needs a reachable address)
 //	relay node    run a node (dials out to the server)
 //	relay token   print a random token
@@ -16,14 +17,16 @@ import (
 )
 
 // version is set at release time with -ldflags "-X main.version=..."
-var version = "0.7.0-dev"
+var version = "0.8.0-dev"
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		runApp(nil) // double-clicked, or typed with nothing else: the setup page
+		return
 	}
 	switch os.Args[1] {
+	case "ui":
+		runApp(os.Args[2:])
 	case "serve":
 		runServe(os.Args[2:])
 	case "node":
@@ -64,6 +67,8 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
+  relay                 open the setup page in your browser: share this computer, or set up the hub
+  relay ui              the same, with flags  [--no-browser] [--listen 127.0.0.1:PORT]
   relay init            set up a server here: tokens, policy, join code
   relay invite          print the join code and agent setup again
   relay join <code>     set up this machine as a node  [--root DIR] [--allow-exec] [--install]

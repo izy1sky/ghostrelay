@@ -3,9 +3,10 @@
 A walk-through you can follow on one machine in about 30 minutes. Every step
 says what to run and what you should see. Part 1 sets up the server and two
 nodes. Parts 2–9 test one feature each. Part 10 connects a real agent
-(Claude Code), Part 11 adds a Windows or Linux machine, and Part 12 tests
-the one-command setup (`relay init`, `relay join`, `relay service`), and Part 13
-the grants that keep approvals down to one per task.
+(Claude Code), and Part 11 adds a Windows or Linux machine. Part 12 tests
+the one-command setup (`relay init`, `relay join`, `relay service`), Part 13
+the grants that keep approvals down to one per task, and Part 14 the setup
+page (bare `relay`) and the console.
 
 You need Go 1.24+, Python 3, and `curl`. Commands are for macOS or Linux
 (zsh or bash). Everything stays inside `~/relay-test`.
@@ -590,9 +591,9 @@ agent request_grant '{"node":"mac","programs":["sh","rm"],"paths":["app"],"minut
 | 13.3b | `agent fs_remove '{"node":"mac","path":"app/out.txt"}'` | removed, without asking (inside `app/`) |
 | 13.3c | `./relay grants revoke <that grant's id>`, then repeat 13.3b on `app/main.py` | it asks again |
 
-### 13.4 On the admin page
+### 13.4 In the console
 
-Open <http://127.0.0.1:8790/admin/>, paste the admin token
+Open <http://127.0.0.1:8790/admin/#approvals>, paste the admin token
 (`relay invite` prints it), then queue a few calls:
 
 ```bash
@@ -609,10 +610,74 @@ agent request_grant '{"node":"mac","programs":["npm","node"],"paths":["app"],"mi
   **Grant for 45 min** (as asked), **Grant for 1 h** (the picker's duration)
   and **Deny**.
 
-Above them, **Allow all 2 waiting from default** approves the calls once each.
+Above them, **Allow all 2 from default once** approves the calls once each.
 Click **Allow similar**: the call runs, and *Active grants* lists
 `exec of node on mac` with **Revoke**. Grants survive a server restart: stop
 and start `relay serve`, and they're still there (`relay grants`).
+
+---
+
+## Part 14. The setup page and the console
+
+Run it in a throwaway `RELAY_HOME`, and leave the "keep running" boxes
+unticked unless you want real services:
+
+```bash
+export RELAY_HOME=~/relay-test/ui && mkdir -p ~/relay-test/share
+./relay
+```
+
+✅ A browser tab opens on `http://127.0.0.1:<port>/` with **Welcome to
+ghostrelay** and two choices. The terminal prints the same link. Open
+`http://127.0.0.1:<port>/` without the `#k=…` part in a private window: it
+asks for the link, and `curl http://127.0.0.1:<port>/api/state` answers 401.
+
+### 14.1 Be the hub
+
+**Be the hub** → **My own domain**, type `127.0.0.1`, port `47802`, **Check
+the port** (✅ *free here*) → **Continue** → **Balanced** → untick *Keep the hub
+running* → **Start the hub**.
+
+✅ The page now shows *This computer is the hub*, **● running**, its address
+and a masked join code. `~/relay-test/ui/server/server.json` has
+`"listen": ":47802"` and `"url": "http://127.0.0.1:47802"`: the same port.
+
+### 14.2 Share this computer
+
+**Also share this computer** → paste the join code (**Copy** on the hub card).
+✅ *This code is for the hub at http://127.0.0.1:47802, and the hub
+answered.* Change one character: ✅ a warning with the reasons it may fail.
+
+**Continue** → type `/` and **Add**: ✅ a warning that this shares the whole
+drive. **Remove** it, add `~/relay-test/share` → **Continue** → untick *Keep
+sharing* → **Start sharing**. ✅ Three ticks, then **Open this computer's
+page**: *Sharing is on*.
+
+Have the agent write and run something on node `mbp` (or whatever name you
+kept), then look at *What agents did here*: ✅ one line per call, newest first.
+
+**Pause sharing**: ✅ *Sharing is paused*, and within 2 s the console and
+`nodes_list` no longer list the node. **Resume sharing**: ✅ back within a few
+seconds.
+
+### 14.3 The console
+
+On the hub card, **Open the console**. ✅ Signed in already (the link carries
+the admin key), on **Machines** with the node's card.
+
+- **Add a machine**: pick Windows / macOS / Linux and amd64 / arm64; the
+  download name and the command change with them. **Copy** puts the real join
+  code into the command.
+- **Approvals**: run a command the policy asks about. ✅ The badge counts it,
+  and the card offers the same choices as Part 13.4.
+- **Connect an agent**: **Check the connection** ✅ *Works: 18 tools, 1 machine*.
+- **Activity**: the calls, approvals and connections, with filters.
+
+### 14.4 Leave
+
+Back on the page: **Stop sharing for good** → **Leave the hub** → confirm. ✅
+`~/relay-test/ui/node.json` and its `node.*` files are gone, and the page shows
+the hub card only. Ctrl-C `./relay`: ✅ the hub it started stops too.
 
 ---
 

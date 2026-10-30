@@ -297,89 +297,6 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-const adminPage = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>relay approvals</title>
-<style>
-:root{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--card:#fff;--line:#e7e5e4;--ok:#15803d;--no:#b91c1c;--accent:#1d4ed8}
-@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--card:#292524;--line:#44403c;--ok:#4ade80;--no:#f87171;--accent:#93c5fd}}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
-main{max-width:760px;margin:0 auto;padding:16px}
-h1{font-size:18px;margin:8px 0 4px} h2{font-size:15px;margin:22px 0 8px;color:var(--muted);font-weight:600}
-.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:13px;margin-bottom:12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
-.grant{border-left:4px solid var(--accent)}
-.meta{color:var(--muted);font-size:13px}
-.why{margin:6px 0;font-weight:500}
-pre{white-space:pre-wrap;word-break:break-all;margin:8px 0;font:13px ui-monospace,monospace}
-.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-button{font:inherit;font-size:14px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;text-align:left}
-button small{display:block;color:var(--muted);font-size:12px;max-width:34ch;overflow-wrap:anywhere}
-.allow{border-color:var(--ok);color:var(--ok)} .deny{border-color:var(--no);color:var(--no)} .wide{border-color:var(--accent);color:var(--accent)}
-select,input{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
-input{width:100%;box-sizing:border-box}
-.empty{color:var(--muted)}
-</style></head><body><main>
-<h1>relay approvals</h1>
-<div class="bar">Wider approvals last <select id="dur"><option value="15">15 minutes</option><option value="60" selected>1 hour</option><option value="240">4 hours</option><option value="480">8 hours</option></select>
-<span>· deny rules in the policy always apply</span></div>
-<div id="login" class="card" hidden><label>Admin token<br><input id="tok" type="password" autocomplete="off"></label>
-<p><button id="save">Save for this tab</button></p></div>
-<div id="bulk"></div>
-<div id="list"></div><p id="empty" class="empty" hidden>Nothing waiting for approval.</p>
-<h2>Active grants</h2><div id="grants"></div>
-<script>
-const $=s=>document.querySelector(s);
-let tok=''; try{tok=sessionStorage.getItem('relayAdmin')||''}catch(e){}
-try{const d=localStorage.getItem('relayDur'); if(d) $('#dur').value=d}catch(e){}
-$('#dur').onchange=()=>{try{localStorage.setItem('relayDur',$('#dur').value)}catch(e){}};
-$('#save').onclick=()=>{tok=$('#tok').value.trim(); try{sessionStorage.setItem('relayAdmin',tok)}catch(e){} load()};
-function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-const H=()=>({'Authorization':'Bearer '+tok,'Content-Type':'application/json'});
-function mins(){return +$('#dur').value}
-function human(m){return m>=60?(m/60)+' h':m+' min'}
-async function decide(id,decision,minutes){
-  const reason=decision==='deny'?(prompt('Reason (optional, shown to the agent)')||''):'';
-  const r=await fetch('api/decide',{method:'POST',headers:H(),body:JSON.stringify({id,decision,minutes:minutes||0,reason,by:'web'})});
-  if(!r.ok) alert(await r.text());
-  load();
-}
-async function revoke(id){await fetch('api/grants/revoke',{method:'POST',headers:H(),body:JSON.stringify({id,by:'web'})}); load()}
-function btn(cls,label,sub,on){return '<button class="'+cls+'" data-on="'+esc(on)+'">'+label+(sub?'<small>'+esc(sub)+'</small>':'')+'</button>'}
-function card(p){
-  const head='<div class="meta">'+esc(p.id)+' · agent <b>'+esc(p.agent)+'</b> · node <b>'+esc(p.node||'-')+'</b> · '+esc(p.verdict)+' · expires '+new Date(p.expires).toLocaleTimeString()+'</div>';
-  if(p.kind==='grant') return '<div class="card grant">'+head+'<div class="why">'+esc(p.reason)+'</div><pre>'+esc(p.grant_scope)+'</pre>'+
-    '<div class="btns">'+btn('allow','Grant for '+human(p.minutes),'as asked','grant:'+p.id+':'+p.minutes)+btn('wide','Grant for '+human(mins()),'the chosen duration','grant:'+p.id+':'+mins())+btn('deny','Deny','','deny:'+p.id)+'</div></div>';
-  return '<div class="card">'+head+'<pre>'+esc(p.tool)+(p.command?'\n$ '+esc(p.command):'')+(p.path?'\n'+esc(p.path):'')+'</pre>'+
-    (p.reason?'<div class="meta">'+esc(p.reason)+'</div>':'')+
-    '<div class="btns">'+btn('allow','Allow once','','allow:'+p.id)+
-    (p.similar?btn('wide','Allow similar · '+human(mins()),p.similar,'similar:'+p.id):'')+
-    btn('wide','Everything on node · '+human(mins()),p.node_scope,'node:'+p.id)+
-    btn('deny','Deny','','deny:'+p.id)+'</div></div>';
-}
-async function load(){
-  if(!tok){$('#login').hidden=false;return}
-  const r=await fetch('api/pending',{headers:H()});
-  if(r.status===401){$('#login').hidden=false;return}
-  $('#login').hidden=true;
-  const items=await r.json();
-  $('#empty').hidden=items.length>0;
-  $('#list').innerHTML=items.map(card).join('');
-  const byAgent={}; items.filter(p=>p.kind!=='grant').forEach(p=>(byAgent[p.agent]=byAgent[p.agent]||[]).push(p.id));
-  $('#bulk').innerHTML=Object.entries(byAgent).filter(([a,ids])=>ids.length>1).map(([a,ids])=>'<p><button class="allow" data-on="all:'+esc(ids.join(','))+'">Allow all '+ids.length+' waiting from '+esc(a)+' (once each)</button></p>').join('');
-  const gr=await (await fetch('api/grants',{headers:H()})).json();
-  $('#grants').innerHTML=gr.length?gr.map(g=>'<div class="card"><div class="meta">'+esc(g.id)+' · agent <b>'+esc(g.agent)+'</b> · until '+new Date(g.expires).toLocaleTimeString()+' · used '+g.uses+'× · by '+esc(g.by)+'</div><pre>'+esc(g.scope)+'</pre>'+(g.reason?'<div class="meta">'+esc(g.reason)+'</div>':'')+'<div class="btns">'+btn('deny','Revoke','','revoke:'+g.id)+'</div></div>').join(''):'<p class="empty">None.</p>';
-  document.querySelectorAll('button[data-on]').forEach(b=>b.onclick=()=>{
-    const [what,id,m]=b.dataset.on.split(':');
-    if(what==='revoke') return revoke(id);
-    if(what==='all') return Promise.all(id.split(',').map(i=>fetch('api/decide',{method:'POST',headers:H(),body:JSON.stringify({id:i,decision:'allow',by:'web'})}))).then(load);
-    if(what==='grant') return decide(id,'allow',+m);
-    decide(id,what,(what==='similar'||what==='node')?mins():0);
-  });
-}
-load(); setInterval(load,2000);
-</script></main></body></html>`
-
 func (s *server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/admin/" {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
@@ -387,7 +304,7 @@ func (s *server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
-	w.Write([]byte(adminPage))
+	w.Write([]byte(consolePage))
 }
 
 // ---- CLI: approvals / approve / deny / hash / policy check -----------------------

@@ -4,3 +4,5 @@ dist/
 /relay.exe
 .idea/
 .DS_Store
+/ghostrelay
+/ghostrelay.exe

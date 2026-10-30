@@ -200,6 +200,28 @@ Admin endpoints, all with `Authorization: Bearer <ADMIN_TOKEN>`:
 | `POST /admin/api/decide`   | `{"id", "decision": "allow" \| "always" \| "similar" \| "node" \| "deny", "minutes"?, "reason"?, "by"?}` → `ok`, or 404 if already gone. `similar` / `node` also store the offered grants for `minutes` (default 60); `allow` on a `grant` entry stores the requested grant |
 | `GET /admin/api/grants`    | active grants: `[{id, agent, node, tools?, paths?, programs?, reason?, by, created, expires, uses, scope}]` |
 | `POST /admin/api/grants/revoke` | `{"id", "by"?}` → `ok`, or 404 |
+| `GET /admin/api/nodes`     | connected nodes: their `node_info` plus `remote` and `connected_at` |
+| `GET /admin/api/setup`     | `{version, url, listen, tls, join_code?, agent_token, named_agents, policy: {file, default, rules}, warning?}`: what the console needs to add machines and agents. `warning` is set when the port in `url` differs from `listen` |
+| `GET /admin/api/activity?limit=N` | the newest audit records first (default 300, max 1000) |
+
+The console at `/admin/` is one page using only these calls; a `#k=<admin token>`
+fragment in its link signs it in for that tab.
+
+### The local page (bare `relay`)
+
+`relay` with no arguments, or `relay ui [--listen 127.0.0.1:PORT] [--no-browser]`,
+serves a setup page on a loopback address and opens it. Its JSON API lives
+under `/api/` and answers only requests whose `Host` is `127.0.0.1:PORT` or
+`localhost:PORT` and that carry the random `X-Relay-Key` from the printed link
+(`#k=...`). It drives the same code as `relay init`, `relay join` and
+`relay service`. Nodes and servers it starts without a service run as its
+child processes and stop with it.
+
+A node with a settings file keeps three files beside it, which the page reads:
+`node.status.json` (state, since, last error; rewritten every 5 s, so older
+than 15 s means not running), `node.activity.jsonl` (each call it ran, minus
+polling and transfer plumbing; rotated at 1 MiB) and `node.paused` (while it
+exists, the node stays disconnected).
 | `GET /admin/`              | the approval page; it needs no token to load, but asks for one before showing data |
 
 ## 5. Audit

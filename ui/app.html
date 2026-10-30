@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ghostrelay</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11171f;--panel2:#161e28;--line:#243041;--line2:#2b3a4d;--fg:#e6edf3;--soft:#b4c0cc;--muted:#9aa7b6;
+  --green:#39d353;--green-bg:#0f1d14;--green-line:#1f4a2a;--on-green:#0b0f14;--amber:#e3b341;--amber-bg:#1a1609;--amber-line:#5a4720;--amber-text:#d8cfae;
+  --red:#ff7b72;--red-bg:#2a1414;--red-line:#5c2b2b;--blue:#79c0ff;--blue-bg:#0f1a26;--blue-line:#24405e;--code:#070a0e;--code-fg:#c9f7d2}
+@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;--line:#d8dee4;--line2:#c4ccd4;--fg:#1f2328;--soft:#424a53;--muted:#59636e;
+  --green:#1a7f37;--green-bg:#e9f7ee;--green-line:#a6dcb6;--on-green:#fff;--amber:#9a6700;--amber-bg:#fff8e5;--amber-line:#eac54f;--amber-text:#6b4c00;
+  --red:#cf222e;--red-bg:#ffebe9;--red-line:#ffb8b3;--blue:#0969da;--blue-bg:#ddf4ff;--blue-line:#9cd1ff;--code:#f6f8fa;--code-fg:#116329}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--blue)}
+.mono,code,pre,textarea.mono,input.mono{font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace}
+.wrap{max-width:820px;margin:0 auto;padding:28px 20px 64px;display:flex;flex-direction:column;gap:28px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--fg);text-decoration:none;font-weight:700;font-size:17px;background:none;border:0;cursor:pointer;min-height:44px;padding:0}
+h1{margin:0;font-size:30px;letter-spacing:-.02em;line-height:1.2}
+h2{margin:0;font-size:17px}
+p{margin:0}
+.lead{font-size:16px;color:var(--soft)}
+.muted{color:var(--muted);font-size:14px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:15px;padding:11px 18px;min-height:46px;border-radius:10px;border:1px solid var(--line2);background:var(--panel2);color:var(--fg);cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--muted)}
+.btn.go{background:var(--green);border-color:var(--green);color:var(--on-green);font-weight:600}
+.btn.no{color:var(--red);border-color:var(--red-line)}
+.btn.small{min-height:38px;padding:7px 13px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;display:flex;flex-direction:column;gap:14px}
+.opt{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border-radius:12px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font:inherit;color:var(--fg);text-align:left;width:100%}
+.opt[aria-checked=true]{border-color:var(--green);background:var(--green-bg)}
+.ring{width:20px;height:20px;border-radius:50%;flex:none;margin-top:2px;border:2px solid var(--line2)}
+.opt[aria-checked=true] .ring{border:6px solid var(--green)}
+.choice{display:flex;flex-direction:column;gap:12px;padding:26px;border-radius:16px;border:1px solid var(--line);background:var(--panel);color:var(--fg);text-align:left;font:inherit;cursor:pointer}
+.choice:hover{border-color:var(--green)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.field{font:inherit;font-size:16px;padding:11px 13px;min-height:46px;border-radius:10px;border:1px solid var(--line2);background:var(--bg);color:var(--fg);width:100%}
+.field:focus,.btn:focus-visible,.opt:focus-visible,.choice:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.note{padding:14px 16px;border-radius:12px;font-size:15px;line-height:1.55;border:1px solid}
+.note.ok{background:var(--green-bg);border-color:var(--green-line)}
+.note.warn{background:var(--amber-bg);border-color:var(--amber-line);color:var(--amber-text)}
+.note.warn b{color:var(--amber)}
+.note.bad{background:var(--red-bg);border-color:var(--red-line)}
+.note ul{margin:8px 0 0;padding-left:20px}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none;font-size:14px;color:var(--muted)}
+.steps li{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 5px;border-radius:999px}
+.steps li[aria-current=step]{background:var(--panel2);color:var(--fg)}
+.steps .dot{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:1px solid var(--line2)}
+.steps .done .dot,.steps [aria-current=step] .dot{background:var(--green);border-color:var(--green);color:var(--on-green)}
+.nav{display:flex;justify-content:space-between;gap:12px;padding-top:8px;border-top:1px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.folder{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel)}
+.folder span{flex:1;min-width:0;word-break:break-all}
+.chip{font:inherit;font-size:14px;padding:9px 14px;min-height:42px;border-radius:999px;border:1px dashed var(--line2);background:none;color:var(--soft);cursor:pointer}
+.chip:hover{border-color:var(--green);color:var(--fg)}
+.codebox{display:flex;align-items:stretch;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--code)}
+.codebox pre{margin:0;flex:1;min-width:0;padding:14px;font-size:14px;line-height:1.55;white-space:pre-wrap;word-break:break-all;color:var(--code-fg)}
+.codebox .btn{border:0;border-left:1px solid var(--line2);border-radius:0;min-width:96px}
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:18px;padding:26px;border-radius:16px;border:1px solid}
+.hero.on{background:var(--green-bg);border-color:var(--green-line)}
+.hero.wait{background:var(--amber-bg);border-color:var(--amber-line)}
+.hero.off{background:var(--panel);border-color:var(--line)}
+.bigdot{width:18px;height:18px;border-radius:50%;flex:none}
+.on .bigdot{background:var(--green)} .wait .bigdot{background:var(--amber)} .off .bigdot{background:var(--muted)}
+.list{margin:0;padding:0;list-style:none}
+.list li{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;padding:11px 0;border-top:1px solid var(--line)}
+.list .t{font-size:13px;color:var(--muted);min-width:64px;white-space:nowrap}
+.list .w{flex:1 1 260px;min-width:0;word-break:break-word}
+.check{display:flex;align-items:center;gap:12px;min-height:46px;cursor:pointer}
+.check input{width:20px;height:20px;accent-color:var(--green)}
+details{border:1px solid var(--line);border-radius:14px;padding:2px 22px}
+summary{cursor:pointer;min-height:46px;display:flex;align-items:center;font-weight:600}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.spin{width:22px;height:22px;border-radius:50%;border:3px solid var(--green);border-right-color:transparent;animation:s 1s linear infinite;flex:none}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app" aria-live="polite"><p class="muted">Loading…</p></div>
+<script>
+'use strict';
+const GHOST='<svg width="SZ" height="SZ" viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--green)" d="M4 1h8v1h2v2h1v11h-2v-1h-2v1h-2v-1H7v1H5v-1H3v1H1V4h1V2h2z"/><path fill="var(--bg)" d="M4 6h1v1h1v1H5v1H4V8h1V7H4zM8 9h4v1H8z"/></svg>';
+const ghost=n=>GHOST.replace(/SZ/g,n);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s);
+
+let KEY='';
+try{KEY=sessionStorage.getItem('relayKey')||''}catch(e){}
+const m=location.hash.match(/k=([0-9a-f]+)/);
+if(m){KEY=m[1];try{sessionStorage.setItem('relayKey',KEY)}catch(e){};history.replaceState(null,'',location.pathname)}
+
+async function api(path,body){
+  const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-Relay-Key':KEY,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+  let j; try{j=await r.json()}catch(e){j={error:await r.text().catch(()=>r.statusText)}}
+  if(!r.ok) throw new Error(j.error||r.statusText);
+  return j;
+}
+
+let S=null;              // /api/state
+let view='home';         // home | welcome | join | hub
+let J=null, H=null;      // wizard state
+let activity=[];
+let flash='';
+
+function since(t){
+  const s=Math.max(0,(Date.now()-new Date(t))/1000);
+  if(s<90) return 'a minute'; const m=Math.round(s/60); if(m<90) return m+' min';
+  const h=Math.floor(m/60); return h<48?h+' h '+(m%60)+' min':Math.floor(h/24)+' days';
+}
+function clock(t){return new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+function topbar(right){return '<div class="top"><button class="brand" data-act="home">'+ghost(28)+'ghostrelay</button>'+(right||'')+'</div>'}
+function steps(names,at){return '<ol class="steps" aria-label="Steps">'+names.map((n,i)=>'<li class="'+(i+1<at?'done':'')+'"'+(i+1===at?' aria-current="step"':'')+'><span class="dot">'+(i+1<at?'✓':i+1)+'</span>'+n+'</li>').join('')+'</ol>'}
+function opt(group,val,cur,title,desc,tag){return '<button class="opt" type="button" role="radio" aria-checked="'+(val===cur)+'" data-act="pick" data-group="'+group+'" data-val="'+val+'"><span class="ring"></span><span style="display:flex;flex-direction:column;gap:4px"><strong>'+title+(tag||'')+'</strong><span class="muted" style="font-size:15px;color:var(--soft)">'+desc+'</span></span></button>'}
+function flashNote(){if(!flash) return ''; const f=flash; flash=''; return '<div class="note bad" role="alert">'+esc(f)+'</div>'}
+const REACH_HINTS='<ul><li><b>Connection refused:</b> is the hub running? On the hub, run <code>relay</code> and check its page, or <code>relay serve</code>.</li><li><b>Timed out:</b> a firewall blocks the port. Open it in the cloud provider\'s firewall or security group, and on the hub.</li><li><b>Wrong port:</b> the port in the code must be the one the hub listens on.</li><li><b>Token rejected:</b> the code is from an older setup. Ask for a fresh one.</li></ul>';
+
+// ---------- views ----------
+function render(){
+  if(!KEY){ $('#app').innerHTML=topbar()+'<div class="card"><h1>Open the link from relay</h1><p class="lead">For safety this page only works from the link relay printed when it started (it carries a key). Run <code>relay</code> again if you closed that window.</p></div>'; return }
+  if(!S) return;
+  const v=view==='home'&&!S.node.configured&&!S.hub.configured?'welcome':view;
+  const open=[...document.querySelectorAll('details[id]')].filter(d=>d.open).map(d=>d.id);
+  $('#app').innerHTML=({welcome:welcome,join:joinView,hub:hubView,home:home}[v])();
+  open.forEach(id=>{const d=document.getElementById(id); if(d) d.open=true});
+  const f=document.querySelector('[data-focus]'); if(f) f.focus();
+}
+
+function welcome(){
+  return '<header style="display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;padding-top:24px">'+ghost(64)+
+  '<h1 style="font-size:34px">Welcome to ghostrelay</h1><p class="lead" style="max-width:620px;font-size:18px">It lets an AI agent on one computer use the files and programs on your other computers. You choose which folders, and risky steps wait for your OK.</p></header>'+
+  '<section style="display:flex;flex-direction:column;gap:14px"><h2 class="muted" style="text-align:center;font-weight:600">What should this computer do?</h2><div class="grid2">'+
+  '<button class="choice" data-act="startJoin"><strong style="font-size:20px">Share this computer with my agent</strong><span style="color:var(--soft)">You have a join code from whoever set up the hub. Takes about a minute.</span><span style="color:var(--green);font-weight:600;margin-top:auto">Start →</span></button>'+
+  '<button class="choice" data-act="startHub"><strong style="font-size:20px">Be the hub</strong><span style="color:var(--soft)">Do this once, on a computer or cloud server the others can reach. Your agent connects here.</span><span style="color:var(--blue);font-weight:600;margin-top:auto">Set up →</span></button>'+
+  '</div></section>'+
+  '<p class="muted" style="text-align:center">This page runs only on this computer. Nothing is shared until you finish a setup. relay '+esc(S.version)+' · <a href="https://github.com/izy1sky/ghostrelay" target="_blank" rel="noopener">Help</a></p>';
+}
+
+// ----- share this computer -----
+function joinView(){
+  const nav=(next,label,can)=>'<div class="nav"><button class="btn" data-act="'+(J.step===1?'home':'jback')+'">'+(J.step===1?'Cancel':'Back')+'</button><button class="btn go" data-act="'+next+'"'+(can?'':' disabled')+'>'+label+'</button></div>';
+  let body='';
+  if(J.step===1){
+    body='<section style="display:flex;flex-direction:column;gap:18px"><h1>Paste your join code</h1><p class="lead">It starts with <code>rj1_</code>. Whoever set up the hub can copy one from the hub\'s page or console.</p>'+
+      '<label class="sr" for="code">Join code</label><textarea id="code" class="field mono" rows="3" placeholder="rj1_…" data-focus style="resize:vertical;word-break:break-all">'+esc(J.code)+'</textarea>'+
+      '<div class="row"><button class="btn" data-act="pasteCode">Paste from clipboard</button></div><div id="codeStatus">'+codeStatus()+'</div>'+flashNote()+'</section>'+nav('jnext','Continue',codeOK());
+  }else if(J.step===2){
+    const chosen=new Set(J.roots.map(r=>r.path));
+    body='<section style="display:flex;flex-direction:column;gap:18px"><h1>Which folders can the agent use?</h1><p class="lead">It can\'t see anything outside these. Pick the project folders it needs, not your whole drive.</p>'+
+      (J.roots.length?'<div style="display:flex;flex-direction:column;gap:8px">'+J.roots.map((r,i)=>'<div class="folder"><span class="mono">'+esc(r.path)+'</span><button class="btn small" data-act="rmRoot" data-i="'+i+'" aria-label="Remove '+esc(r.path)+'">Remove</button></div>'+(r.warning?'<div class="note warn" role="alert"><b>Careful.</b> '+esc(r.warning)+'</div>':'')).join('')+'</div>':'<p class="muted">No folder yet.</p>')+
+      '<div class="row"><button class="btn go" data-act="pickRoot">Choose a folder…</button>'+(S.suggest||[]).filter(f=>!chosen.has(f.path)).map(f=>'<button class="chip" data-act="addRoot" data-path="'+esc(f.path)+'">+ '+esc(f.label)+'</button>').join('')+'</div>'+
+      '<div class="row"><label class="sr" for="rootIn">Folder path</label><input id="rootIn" class="field mono" style="flex:1 1 320px" placeholder="or type a path, like '+(S.os==='windows'?'D:\\work':'~/Projects/site')+'"><button class="btn" data-act="typeRoot">Add</button></div>'+
+      flashNote()+'</section>'+nav('jnext','Continue',J.roots.length>0);
+  }else if(J.step===3){
+    const svc=S.os==='windows'?'when you log in':'when you log in, also after restarts';
+    body='<section style="display:flex;flex-direction:column;gap:20px"><h1>What can the agent do here?</h1><p class="lead">The hub\'s owner still approves risky steps. This is the upper limit for this computer.</p>'+
+      '<div role="radiogroup" aria-label="Permissions" style="display:flex;flex-direction:column;gap:10px">'+
+      opt('mode','files',J.mode,'Files only','Read, write and organize files in your folders. No programs run.')+
+      opt('mode','exec',J.mode,'Files and programs','Also run commands, like builds, scripts or training. Most coding work needs this.')+'</div>'+
+      '<div style="display:flex;flex-direction:column;gap:8px;max-width:420px"><label class="label" for="nm">Name for this computer</label><input id="nm" class="field mono" value="'+esc(J.name)+'"><span class="muted">Agents and the console show this name. Letters, digits, - _ .</span></div>'+
+      '<label class="check"><input type="checkbox" id="auto"'+(J.auto?' checked':'')+'>Keep sharing '+svc+'</label>'+
+      '<p class="muted" style="margin-top:-12px">Unticked, it shares only while this window is open.</p>'+flashNote()+'</section>'+nav('jsubmit','Start sharing',!J.busy);
+  }else{
+    const n=S.node, st=n.status||{};
+    const done=n.configured&&st.state==='connected';
+    const stepLi=(label,state)=>'<li class="row" style="font-size:16px">'+(state==='done'?'<span class="dot" style="width:26px;height:26px;border-radius:50%;background:var(--green);color:var(--on-green);display:inline-flex;align-items:center;justify-content:center;font-weight:700">✓</span>':state==='now'?'<span class="spin"></span>':'<span style="width:26px;height:26px;border-radius:50%;border:2px solid var(--line2)"></span>')+label+'</li>';
+    body='<section style="display:flex;flex-direction:column;gap:22px"><h1>'+(done?esc(n.name)+' is shared':'Connecting…')+'</h1><ol class="list" style="display:flex;flex-direction:column;gap:12px">'+
+      stepLi('Saving the settings',n.configured?'done':'now')+stepLi('Starting relay',n.running||n.here?'done':n.configured?'now':'')+stepLi('Reaching the hub',done?'done':(n.running?'now':''))+'</ol>'+
+      (st.error&&!done?'<div class="note warn"><b>Still trying:</b> <span class="mono" style="font-size:13px">'+esc(st.error)+'</span>'+REACH_HINTS+'</div>':'')+
+      (done?'<div class="row"><button class="btn go" data-act="home" data-focus>Open this computer\'s page</button></div>':'')+'</section>';
+  }
+  return topbar(J.step<4?steps(['Join code','Folders','Permissions'],J.step):'')+body;
+}
+
+function codeOK(){return !!(J.check&&J.check.server&&!J.check.problem)}
+function codeStatus(){
+  if(J.checking) return '<div class="row muted"><span class="spin"></span>Checking the code…</div>';
+  if(!J.check) return '';
+  if(J.check.error) return '<div class="note bad" role="alert">'+esc(J.check.error)+'</div>';
+  if(J.check.problem) return '<div class="note warn" role="alert"><b>This code is for the hub at <span class="mono">'+esc(J.check.server)+'</span>, but it didn\'t answer.</b><br><span class="mono" style="font-size:13px">'+esc(J.check.problem.split('\n')[0])+'</span>'+REACH_HINTS+'<div style="margin-top:10px"><button class="btn small" data-act="recheck">Try again</button></div></div>';
+  return '<div class="note ok" role="status">✓ This code is for the hub at <b class="mono">'+esc(J.check.server)+'</b>, and the hub answered.</div>';
+}
+function showCodeStatus(){ // update in place, so typing in the box isn't interrupted
+  const el=$('#codeStatus'); if(!el){render();return}
+  el.innerHTML=codeStatus();
+  const go=document.querySelector('[data-act=jnext]'); if(go) go.disabled=!codeOK();
+}
+
+// ----- be the hub -----
+function hubView(){
+  const nav=(next,label,can)=>'<div class="nav"><button class="btn" data-act="'+(H.step===1?'home':'hback')+'">'+(H.step===1?'Cancel':'Back')+'</button><button class="btn go" data-act="'+next+'"'+(can?'':' disabled')+'>'+label+'</button></div>';
+  const host=hubHost();
+  let body='';
+  if(H.step===1){
+    const pub=H.publicIP?'Public address '+esc(H.publicIP):'Public address';
+    const pc=H.portCheck;
+    body='<section style="display:flex;flex-direction:column;gap:20px"><h1>How will your other computers reach this one?</h1><p class="lead">Pick the address they should use. Join codes will contain it.</p>'+
+      '<div role="radiogroup" aria-label="Address" style="display:flex;flex-direction:column;gap:10px">'+
+      opt('addr','public',H.addr,pub,'Seen from the internet. Use this for a cloud server, or for computers in different places.')+
+      opt('addr','lan',H.addr,'Local network '+esc(S.lan),'Only computers on the same Wi-Fi or office network can join.')+
+      opt('addr','domain',H.addr,'My own domain','If you pointed a name like relay.example.com at this computer.')+'</div>'+
+      (H.addr==='public'?'<div class="row"><label class="sr" for="pubIn">Public address</label><input id="pubIn" class="field mono" style="flex:1 1 240px" placeholder="203.0.113.5" value="'+esc(H.publicIP)+'"><button class="btn" data-act="findIP">'+(H.finding?'Asking…':'Find my public address')+'</button></div><p class="muted" style="margin-top:-12px">Finding it asks api.ipify.org. A cloud server\'s console also shows it.</p>':'')+
+      (H.addr==='domain'?'<div style="display:flex;flex-direction:column;gap:8px"><label class="label" for="domIn">Your domain</label><input id="domIn" class="field mono" placeholder="relay.example.com" value="'+esc(H.domain)+'"></div>':'')+
+      '<div class="row" style="align-items:flex-end"><div style="display:flex;flex-direction:column;gap:8px;width:150px"><label class="label" for="portIn">Port</label><input id="portIn" class="field mono" inputmode="numeric" value="'+esc(H.port)+'"></div><button class="btn" data-act="checkPort">Check the port</button>'+
+      '<p class="muted" style="flex:1 1 240px">The hub listens on this port and writes the same port into join codes, so they always match.</p></div>'+
+      (pc&&pc.problem?'<div class="note bad" role="alert">'+esc(pc.problem)+'</div>':'')+
+      (pc&&pc.free?'<div class="note ok" role="status">Port '+esc(H.port)+' is free here. If this is a cloud server, also allow port '+esc(H.port)+' (TCP) in its firewall or security group.</div>':'')+
+      '<div class="card" style="padding:16px 18px"><span>Joining computers will dial <b class="mono">'+esc(host?'http://'+host+':'+H.port:'…')+'</b></span></div>'+flashNote()+'</section>'+nav('hnext','Continue',!!host&&/^\d+$/.test(H.port));
+  }else if(H.step===2){
+    const tag=(t,c)=>' <span style="font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;margin-left:6px;background:var(--'+c+'-bg);color:var(--'+c+')">'+t+'</span>';
+    body='<section style="display:flex;flex-direction:column;gap:20px"><h1>How careful should the hub be?</h1><p class="lead">You can change this later in the hub\'s policy.json. Anything the hub asks about waits for your OK in the console.</p>'+
+      '<div role="radiogroup" aria-label="Safety" style="display:flex;flex-direction:column;gap:10px">'+
+      opt('preset','workspace',H.preset,'Balanced','Reading files and harmless commands like git status just work, and so do file changes inside the shared folders. Changes to .git, .env and .ssh are always blocked. Other commands ask you.',tag('Recommended','green'))+
+      opt('preset','ask',H.preset,'Ask every time','Everything except reading waits for your OK. Safest, but you will click a lot.')+
+      opt('preset','readonly',H.preset,'Look only','Agents can read files but never change anything or run programs.')+
+      opt('preset','open',H.preset,'No questions','Everything is allowed. Only for a quick test on your own machines.',tag('Risky','red'))+'</div></section>'+nav('hnext','Continue',true);
+  }else if(H.step===3){
+    const names={workspace:'Balanced',ask:'Ask every time',readonly:'Look only',open:'No questions'};
+    body='<section style="display:flex;flex-direction:column;gap:20px"><h1>Ready to start</h1>'+
+      '<div class="grid2"><div class="card" style="padding:16px 18px;gap:6px"><span class="label">Address</span><span class="mono">http://'+esc(host)+':'+esc(H.port)+'</span></div><div class="card" style="padding:16px 18px;gap:6px"><span class="label">Safety</span><span>'+names[H.preset]+'</span></div></div>'+
+      '<label class="check"><input type="checkbox" id="hauto"'+(H.auto?' checked':'')+'>Keep the hub running, also after this computer restarts</label>'+
+      '<p class="muted" style="margin-top:-12px">Unticked, the hub runs only while this window is open.</p>'+flashNote()+'</section>'+nav('hsubmit',H.busy?'Starting…':'Start the hub',!H.busy);
+  }
+  return topbar(steps(['Address','Safety','Start'],H.step))+body;
+}
+function hubHost(){
+  if(H.addr==='public') return (H.publicIP||'').trim();
+  if(H.addr==='lan') return S.lan;
+  return (H.domain||'').trim();
+}
+
+// ----- home: this computer -----
+function home(){
+  const n=S.node, h=S.hub;
+  let out=topbar('<span class="muted">This computer · <span class="mono">'+esc(S.hostname)+'</span></span>')+flashNote();
+  if(n.configured){
+    const st=n.status||{};
+    const svcOn=n.service&&n.service!=='not installed';
+    let cls='off',title='Not sharing right now',text='relay isn\'t running for this computer.',btn='<button class="btn go" data-act="nodeStart">Start sharing</button>';
+    if(n.paused){cls='wait';title='Sharing is paused';text='Agents can\'t reach this computer until you resume. Programs already running keep going.';btn='<button class="btn go" data-act="resume">Resume sharing</button>'}
+    else if(n.running&&st.state==='connected'){cls='on';title='Sharing is on';text='Connected to the hub for '+since(st.since)+'. Agents can use the folders below.';btn='<button class="btn" data-act="pause">Pause sharing</button>'}
+    else if(n.running||n.here){cls='wait';title='Trying to reach the hub…';text=st.error?'Last try: '+st.error.split('\n')[0]:'Starting up.';btn='<button class="btn" data-act="pause">Pause sharing</button>'}
+    out+='<section class="hero '+cls+'"><span class="bigdot"></span><div style="flex:1 1 300px;display:flex;flex-direction:column;gap:6px;min-width:0"><h1 style="font-size:27px">'+title+'</h1><span style="color:var(--soft);word-break:break-word">'+esc(text)+'</span></div>'+btn+'</section>'+
+      (cls==='wait'&&!n.paused&&st.error?'<div class="note warn">'+REACH_HINTS.replace('<ul>','<ul style="margin-top:0">')+'</div>':'')+
+      '<div class="grid2"><section class="card"><h2>What agents can use</h2><div style="display:flex;flex-direction:column;gap:6px"><span class="label">Folders</span>'+(n.roots||[]).map(r=>'<span class="mono" style="word-break:break-all">'+esc(r)+'</span>').join('')+'</div>'+
+      '<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Programs</span><span>'+(n.allow_exec?'Allowed. Agents can run commands in these folders.':'Not allowed. Files only.')+'</span></div><p class="muted">Risky steps still wait for approval on the hub. To change folders, leave the hub below and share again.</p></section>'+
+      '<section class="card"><h2>Hub</h2><div style="display:flex;flex-direction:column;gap:4px"><span class="label">Address</span><span class="mono" style="word-break:break-all">'+esc(n.server)+'</span></div><div style="display:flex;flex-direction:column;gap:4px"><span class="label">Name here</span><span class="mono">'+esc(n.name)+'</span></div>'+
+      '<label class="check"><input type="checkbox" id="nodeAuto"'+(svcOn?' checked':'')+'>Keep sharing when this window is closed, and after restarts</label><span class="muted" style="margin-top:-8px">'+(svcOn?'Runs in the background ('+esc(n.service)+').':'Shares only while this window is open.')+'</span></section></div>'+
+      '<section class="card"><div class="row" style="justify-content:space-between"><h2>What agents did here</h2><span class="muted">newest first</span></div>'+
+      (activity.length?'<ul class="list">'+activity.map(e=>'<li><span class="t mono">'+clock(e.t)+'</span><span class="w">'+esc(opName(e.op))+' <span class="mono" style="font-size:14px;color:var(--soft)">'+esc(e.what)+'</span></span>'+(e.ok?'':'<span style="color:var(--red);font-size:14px">failed: '+esc(e.error)+'</span>')+'</li>').join('')+'</ul>':'<p class="muted">Nothing yet. Calls from agents show up here.</p>')+'</section>'+
+      '<details id="leaveBox"><summary>Stop sharing for good</summary><div class="row" style="padding:4px 0 18px"><span style="flex:1 1 300px;color:var(--soft)">This computer leaves the hub and forgets its join code. Your files stay where they are. To share again you need a code.</span><button class="btn no" data-act="leave">Leave the hub</button></div></details>';
+  }
+  if(h.configured){
+    const svcOn=h.service&&h.service!=='not installed';
+    out+='<section class="card"><div class="row" style="justify-content:space-between"><h2>'+(n.configured?'This computer is also the hub':'This computer is the hub')+'</h2>'+
+      (h.running?'<span style="color:var(--green);font-weight:600">● running</span>':'<span class="muted">● stopped</span>')+'</div>'+
+      '<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Address in join codes</span><span class="mono">'+esc(h.url)+'</span></div>'+
+      (h.warning?'<div class="note warn">'+esc(h.warning)+'</div>':'')+
+      '<div style="display:flex;flex-direction:column;gap:8px"><span class="label">Join code</span><div class="codebox"><pre>'+esc(J&&J.showCode?h.join_code:h.join_code.slice(0,8)+'••••••••••••'+h.join_code.slice(-4))+'</pre><button class="btn" data-act="copyCode">Copy</button></div><span class="muted">Paste it on each computer to share: run relay there and choose “Share this computer”. Treat it like a password.</span></div>'+
+      '<div class="row">'+(h.running?'<a class="btn go" href="'+esc(h.console)+'" target="_blank" rel="noopener">Open the console</a>':'<button class="btn go" data-act="hubStart">Start the hub</button>')+
+      (!n.configured?'<button class="btn" data-act="startJoin">Also share this computer</button>':'')+'</div>'+
+      '<span class="muted">'+(svcOn?'Runs in the background ('+esc(h.service)+').':h.here?'Runs while this window is open.':'')+'</span></section>';
+  }else if(n.configured){
+    out+='<p class="muted">Setting up a hub instead? Leave the hub above first, or <button class="btn small" data-act="startHub">set one up here too</button></p>';
+  }
+  return out;
+}
+function opName(op){return ({exec:'Ran',fs_read:'Read',fs_write:'Wrote',fs_edit:'Edited',fs_list:'Listed',fs_move:'Moved',fs_remove:'Deleted',fs_mkdir:'Made folder',fs_glob:'Searched',fs_grep:'Searched in files',receive:'Received',job_kill:'Stopped job'})[op]||op}
+
+// ---------- actions ----------
+async function refresh(){
+  try{S=await api('/api/state')}catch(e){if(/key/.test(e.message)){KEY='';try{sessionStorage.removeItem('relayKey')}catch(_){}}flash=e.message}
+  if(S&&S.node.configured&&view==='home'){try{activity=await api('/api/node/activity')}catch(e){}}
+}
+function sig(){return JSON.stringify([S,activity],(k,v)=>k==='updated'?undefined:v)}
+function busyGuard(){const a=document.activeElement; return a&&(a.tagName==='TEXTAREA'||(a.tagName==='INPUT'&&a.type!=='checkbox'))}
+
+let codeTimer=null;
+async function checkCode(){
+  const code=J.code.trim();
+  if(!code){J.check=null;showCodeStatus();return}
+  J.checking=true;showCodeStatus();
+  try{J.check=await api('/api/join/check',{code})}catch(e){J.check={error:e.message}}
+  J.checking=false;showCodeStatus();
+}
+async function addRoot(path){
+  try{const r=await api('/api/folders/check',{path}); if(!J.roots.some(x=>x.path===r.path)) J.roots.push(r)}catch(e){flash=e.message}
+  render();
+}
+
+document.addEventListener('input',e=>{
+  if(e.target.id==='code'){J.code=e.target.value;J.check=null;showCodeStatus();clearTimeout(codeTimer);codeTimer=setTimeout(checkCode,500)}
+  if(e.target.id==='nm') J.name=e.target.value;
+  if(e.target.id==='pubIn'){H.publicIP=e.target.value;updateDial()}
+  if(e.target.id==='domIn'){H.domain=e.target.value;updateDial()}
+  if(e.target.id==='portIn'){H.port=e.target.value.replace(/\D/g,'').slice(0,5);H.portCheck=null;updateDial()}
+});
+function updateDial(){ // keep typing smooth: update the preview and Continue without re-rendering inputs
+  const b=document.querySelector('.card b.mono'); const host=hubHost();
+  if(b) b.textContent=host?'http://'+host+':'+H.port:'…';
+  const go=document.querySelector('[data-act=hnext]'); if(go) go.disabled=!(host&&/^\d+$/.test(H.port));
+}
+document.addEventListener('change',async e=>{
+  if(e.target.id==='auto') J.auto=e.target.checked;
+  if(e.target.id==='hauto') H.auto=e.target.checked;
+  if(e.target.id==='nodeAuto'){
+    e.target.disabled=true;
+    try{await api('/api/node/autostart',{on:e.target.checked})}catch(err){flash=err.message}
+    await refresh();render();
+  }
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='rootIn'){e.preventDefault();addRoot(e.target.value)}});
+
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-act]'); if(!b||b.disabled) return;
+  const act=b.dataset.act;
+  switch(act){
+  case 'home': view='home'; await refresh(); break;
+  case 'startJoin': view='join'; J={step:1,code:'',check:null,roots:[],mode:'exec',name:S.default_name,auto:true}; break;
+  case 'startHub': view='hub'; H={step:1,addr:'public',publicIP:'',domain:'',port:'4747',portCheck:null,preset:'workspace',auto:true}; break;
+  case 'pick': (b.dataset.group==='mode'?J:H)[b.dataset.group]=b.dataset.val; break;
+  case 'pasteCode': try{J.code=(await navigator.clipboard.readText()).trim();$('#code').value=J.code;checkCode();return}catch(err){flash='The browser didn\'t allow reading the clipboard. Paste into the box with Ctrl+V or ⌘V.'} break;
+  case 'recheck': checkCode(); return;
+  case 'jback': J.step--; break;
+  case 'jnext': J.step++; break;
+  case 'pickRoot':
+    b.disabled=true; b.textContent='Waiting for the folder window…';
+    try{const r=await api('/api/folders/pick',{}); if(r.path&&!J.roots.some(x=>x.path===r.path)) J.roots.push(r)}catch(err){flash=err.message}
+    break;
+  case 'addRoot': await addRoot(b.dataset.path); return;
+  case 'typeRoot': await addRoot($('#rootIn').value); return;
+  case 'rmRoot': J.roots.splice(+b.dataset.i,1); break;
+  case 'jsubmit':
+    J.busy=true; render();
+    try{await api('/api/join',{code:J.code.trim(),name:J.name.trim(),roots:J.roots.map(r=>r.path),allow_exec:J.mode==='exec',autostart:J.auto});J.step=4;await refresh()}
+    catch(err){flash=err.message}
+    J.busy=false; break;
+  case 'hback': H.step--; break;
+  case 'hnext': H.step++; break;
+  case 'findIP': H.finding=true; render(); try{H.publicIP=(await api('/api/hub/public',{})).ip}catch(err){flash=err.message} H.finding=false; break;
+  case 'checkPort': try{H.portCheck=await api('/api/hub/check',{port:H.port})}catch(err){H.portCheck={problem:err.message}} break;
+  case 'hsubmit':
+    H.busy=true; render();
+    try{await api('/api/hub/setup',{host:hubHost(),port:H.port,preset:H.preset,autostart:H.auto}); view='home'; await refresh()}
+    catch(err){flash=err.message}
+    H.busy=false; break;
+  case 'pause': case 'resume':
+    try{await api('/api/node/pause',{paused:act==='pause'})}catch(err){flash=err.message} await refresh(); break;
+  case 'nodeStart': try{await api('/api/node/start',{})}catch(err){flash=err.message} await refresh(); break;
+  case 'hubStart': try{await api('/api/hub/start',{})}catch(err){flash=err.message} await new Promise(r=>setTimeout(r,800)); await refresh(); break;
+  case 'copyCode':
+    try{await navigator.clipboard.writeText(S.hub.join_code); b.textContent='Copied'; return}catch(err){J=J||{}; J.showCode=true; flash='The browser didn\'t allow copying. The full code is shown now: select and copy it.'}
+    break;
+  case 'leave':
+    if(!confirm('Leave the hub? Agents will no longer reach this computer, and you will need a new join code to share it again.')) return;
+    try{await api('/api/node/leave',{}); activity=[]}catch(err){flash=err.message} await refresh(); break;
+  }
+  render();
+});
+
+(async()=>{
+  if(KEY) await refresh();
+  render();
+  setInterval(async()=>{
+    if(!KEY||busyGuard()) return;
+    if(view==='home'||(view==='join'&&J&&J.step===4)){
+      const before=sig(); await refresh();
+      if(sig()!==before) render(); // redraw only on change: keeps refs, scroll and focus steady
+    }
+  },3000);
+})();
+</script>
+</body>
+</html>

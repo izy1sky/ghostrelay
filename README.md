@@ -43,8 +43,32 @@ Wire details are in [PROTOCOL.md](PROTOCOL.md).
 
 ## Quick start
 
-Three commands, one per machine. Get `relay` for each OS from
-[Releases](../../releases) (or `go build -o relay .`).
+Get `relay` for each OS from [Releases](../../releases) (or `go build -o relay .`).
+
+### The easy way: open it
+
+Double-click `relay` (or run `relay` with nothing after it). A page opens in
+your browser and asks what this computer should do:
+
+- **Be the hub**, once, on the machine the others can reach: pick its address
+  and port (the same port goes into join codes, so they always match), how
+  careful it should be, and whether it keeps running after restarts. Then it
+  shows the join code and opens the console.
+- **Share this computer**, on every other machine: paste the join code (it is
+  checked against the hub right away), choose folders, choose files only or
+  files and programs. Afterwards the same page shows whether it's connected,
+  what agents did on it, and **Pause** and **Leave** buttons.
+
+The page is served only to this computer (`127.0.0.1`), and only the tab
+opened from the link relay prints can use it. On a server without a screen,
+run `relay ui --no-browser` and tunnel the printed port with `ssh -L`, or use
+the commands below.
+
+The hub's **console** is at `http://<hub>:<port>/admin/`: machines, adding one
+(join code and a ready-made command per OS), approvals and grants, connecting
+Claude Code or Cursor, and the activity log.
+
+### Or with three commands, one per machine
 
 > **The release binaries aren't code-signed yet.** Downloaded through a
 > browser, the OS may refuse or warn the first time. To clear that once:
@@ -90,6 +114,7 @@ Day to day:
 | `relay approvals`, `relay approve <id> [--similar\|--node] [--for 1h]`, `relay deny <id>` | decide calls the policy asks about (on the server, no setup needed) |
 | `relay grants`, `relay grants revoke <id>` | see and end the grants that let calls through without asking |
 | `relay invite` | the join code and agent command again |
+| `relay` | this computer's page: status, pause, leave, or set something up |
 
 Settings live in `~/.relay` (`RELAY_HOME` moves it): `server/server.json`,
 `server/policy.json` and `node.json`. They hold tokens, so they are only

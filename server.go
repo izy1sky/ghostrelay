@@ -40,6 +40,10 @@ type server struct {
 	always  map[string]bool
 
 	grants *grantStore
+
+	// for the console: what to put in join codes and agent setup, and the log it shows
+	pubURL, listen, auditPath string
+	tls                       bool
 }
 
 func runServe(args []string) {
@@ -65,6 +69,10 @@ func runServe(args []string) {
 		nodes:      map[string]*nodeConn{},
 		pending:    map[string]*pendingCall{},
 		always:     map[string]bool{},
+		pubURL:     strings.TrimRight(*pubURL, "/"),
+		listen:     *listen,
+		auditPath:  *auditPath,
+		tls:        *certFile != "" || *keyFile != "",
 	}
 	pol := allowAll
 	if s.policyPath != "" {
@@ -120,6 +128,9 @@ func runServe(args []string) {
 	mux.HandleFunc("/admin/api/decide", s.handleDecide)
 	mux.HandleFunc("/admin/api/grants", s.handleGrants)
 	mux.HandleFunc("/admin/api/grants/revoke", s.handleRevoke)
+	mux.HandleFunc("/admin/api/nodes", s.handleNodes)
+	mux.HandleFunc("/admin/api/setup", s.handleSetup)
+	mux.HandleFunc("/admin/api/activity", s.handleActivity)
 	mux.HandleFunc("/node", s.handleNode)
 	mux.HandleFunc("/mcp", s.handleMCP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
