@@ -125,12 +125,15 @@ func runServe(args []string) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	srv := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
+	if *pubURL != "" {
+		log.Printf("reachable as %s; print join codes with: relay invite", *pubURL)
+		if w := portMismatch(*listen, *pubURL); w != "" {
+			log.Print(w)
+		}
+	}
 	if *certFile != "" || *keyFile != "" {
 		log.Printf("relay %s serving https on %s (nodes: /node, agents: /mcp)", version, *listen)
 		log.Fatal(srv.ListenAndServeTLS(*certFile, *keyFile))
-	}
-	if *pubURL != "" {
-		log.Printf("reachable as %s; print join codes with: relay invite", *pubURL)
 	}
 	log.Printf("relay %s serving PLAIN http on %s (nodes: /node, agents: /mcp)", version, *listen)
 	log.Printf("WARNING: no TLS; tokens travel in clear. Use --tls-cert/--tls-key, a TLS proxy, or a private network")

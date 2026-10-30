@@ -260,6 +260,9 @@ func runInit(args []string) {
 		log.Fatal(err)
 	}
 	fmt.Printf("Wrote %s and policy.json (preset %q).\n\n", cfgPath, *preset)
+	if w := portMismatch(*listen, *pubURL); w != "" {
+		fmt.Println(w + "\n")
+	}
 	printInvite(cfg, cfgPath)
 }
 
@@ -324,6 +327,30 @@ func guessURL(listen string) string {
 		}
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// portMismatch warns when the public url names a different port than the
+// server listens on: nodes then dial a port nothing answers on ("connection
+// refused"). It's only a warning, since a proxy or port forward may map them.
+func portMismatch(listen, pubURL string) string {
+	u, err := url.Parse(pubURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	_, lport, err := net.SplitHostPort(listen)
+	if err != nil {
+		return ""
+	}
+	uport := u.Port()
+	if uport == "" {
+		uport = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	}
+	if uport == "" || uport == lport {
+		return ""
+	}
+	return fmt.Sprintf("WARNING: url %s uses port %s, but the server listens on %s. Nodes and agents dial port %s; "+
+		"unless a proxy or port forward sends it to %s, set listen to :%s (or --listen :%s)",
+		pubURL, uport, listen, uport, lport, uport, uport)
 }
 
 func quoteArg(s string) string {
