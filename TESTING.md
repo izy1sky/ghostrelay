@@ -691,6 +691,9 @@ With the hub and a shared computer from 14.1–14.2 running:
 | 14.5d | `./relay pause`, then `./relay resume` | it disappears from the console within 2 s, and comes back |
 | 14.5e | `./relay leave` | `node.json` is gone, the node process exits by itself, and a background service (if any) is removed |
 | 14.5f | `./relay update --check` | this copy's version, the background copy's (or *none*) and the newest release |
+| 14.5g | Console → **Connect an agent** → **New agent token**, name it `laptop` | a token card with the `claude mcp add` line; `policy.json` gains `"agents"` with only a fingerprint, the rules unchanged |
+| 14.5h | call the hub with that token (`RELAY_AGENT_TOKEN=<it> python3 tests/mcp.py nodes_list`) | it works, and *Activity* shows the call from `laptop` |
+| 14.5i | **Remove** next to `laptop` | the same call now gets 401 |
 
 ---
 

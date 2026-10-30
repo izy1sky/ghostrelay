@@ -106,7 +106,7 @@ async function post(p,b){const r=await fetch('api/'+p,{method:'POST',headers:H()
 
 const D={setup:null,nodes:[],disconnected:[],pending:[],grants:[],activity:[]};
 const A={os:'windows',arch:'amd64',name:'',root:'',exec:true,install:true,showCode:false,known:null,copied:''};
-const C={tab:'claude',show:false,check:''};
+const C={tab:'claude',show:false,check:'',adding:false,created:null};
 const F={kind:'all',q:''};
 let authFailed=false;
 
@@ -242,9 +242,9 @@ function approvals(){
 }
 
 // ---------- connect an agent ----------
-function snippet(show){
+function snippet(show,token){
   const s=D.setup, url=(s.url||location.origin)+'/mcp';
-  const tok=s.agent_token?(show?s.agent_token:'••••••••••••'+s.agent_token.slice(-4)):'<your agent token>';
+  const tok=token||(s.agent_token?(show?s.agent_token:'••••••••••••'+s.agent_token.slice(-4)):'<your agent token>');
   return {
     claude:['Run this where you use Claude Code.','claude mcp add --transport http relay '+url+' \\\n  --header "Authorization: Bearer '+tok+'"'],
     cursor:['Add this to ~/.cursor/mcp.json, then reload Cursor.','{\n  "mcpServers": {\n    "relay": {\n      "url": "'+url+'",\n      "headers": { "Authorization": "Bearer '+tok+'" }\n    }\n  }\n}'],
@@ -259,8 +259,25 @@ function agent(){
     '<div class="codebox"><pre>'+esc(snip[1])+'</pre><button class="btn" data-act="copy" data-what="snippet">'+(A.copied==='snippet'?'Copied':'Copy')+'</button></div>'+
     (s.agent_token?'<div class="row"><button class="btn" data-act="toggleTok">'+(C.show?'Hide token':'Show token')+'</button><button class="btn" data-act="checkAgent">Check the connection</button><span aria-live="polite" style="font-size:14px;'+(C.check.startsWith('✓')?'color:var(--green)':C.check?'color:var(--red)':'')+'">'+esc(C.check)+'</span></div>':
       '<div class="note warn">This hub has no shared agent token: agents are named in the policy file, each with its own token. Put that token where the snippet says.</div>')+'</div></section>'+
-    '<section class="card"><h2>Agents</h2><p class="muted" style="font-size:14px">Give each agent its own token so the policy can treat them differently and the activity log says who did what. Named agents live in the policy file'+(s.policy.file?' (<span class="mono">'+esc(s.policy.file)+'</span>)':'')+'; <code>relay hash</code> prints a token\'s fingerprint for it.</p>'+
-    '<div class="tbl"><table><tbody>'+(s.agent_token?'<tr><td class="mono"><b>default</b></td><td class="muted">the shared agent token from setup</td></tr>':'')+(s.named_agents||[]).map(a=>'<tr><td class="mono"><b>'+esc(a)+'</b></td><td class="muted">named in the policy</td></tr>').join('')+'</tbody></table></div></section>';
+    agentsCard();
+}
+function agentsCard(){
+  const s=D.setup, cr=C.created;
+  let out='<section class="card"><div class="row" style="justify-content:space-between"><h2>Agents</h2>'+
+    (s.policy.file&&!C.adding&&!cr?'<button class="btn go small" data-act="addAgent">New agent token</button>':'')+'</div>'+
+    '<p class="muted" style="font-size:14px">Give each agent machine its own token. The activity log then says which one did what, rules can name it (<code>"agents": ["laptop"]</code> in '+(s.policy.file?'<span class="mono">'+esc(s.policy.file)+'</span>':'the policy file')+'), and removing it cuts off that agent alone.</p>';
+  if(C.adding) out+='<div class="row"><label class="sr" for="agentName">Agent name</label><input id="agentName" class="field mono" style="flex:1 1 220px;width:auto" placeholder="a name, like laptop or ci-bot" autocomplete="off"><button class="btn go" data-act="createAgent">Create token</button><button class="btn" data-act="cancelAgent">Cancel</button></div>';
+  if(cr){
+    const sn=snippet(true,cr.token);
+    out+='<div class="note warn" style="display:flex;flex-direction:column;gap:10px"><b>Token for '+esc(cr.name)+': copy it now, it won\'t be shown again.</b>'+
+      '<span>The hub keeps only its fingerprint. On the agent\'s machine ('+esc({claude:'Claude Code',cursor:'Cursor',other:'any MCP client'}[C.tab])+'; switch with the tabs above):</span>'+
+      '<div class="codebox"><pre>'+esc(sn[1])+'</pre><button class="btn" data-act="copy" data-what="created">'+(A.copied==='created'?'Copied':'Copy')+'</button></div>'+
+      '<div class="row"><span class="mono" style="font-size:13px;word-break:break-all;flex:1 1 300px">'+esc(cr.token)+'</span><button class="btn small" data-act="copy" data-what="createdTok">'+(A.copied==='createdTok'?'Copied':'Copy token only')+'</button><button class="btn small" data-act="doneAgent">Done</button></div></div>';
+  }
+  out+='<div class="tbl"><table><tbody>'+(s.agent_token?'<tr><td class="mono" style="white-space:nowrap"><b>default</b></td><td class="muted">the shared agent token from setup. To retire it, delete <code>agent-token</code> from the hub\'s server.json and restart the hub</td><td></td></tr>':'')+
+    (s.named_agents||[]).map(a=>'<tr><td class="mono" style="white-space:nowrap"><b>'+esc(a)+'</b></td><td class="muted">its own token</td><td style="text-align:right"><button class="btn small no" data-act="removeAgent" data-name="'+esc(a)+'">Remove</button></td></tr>').join('')+'</tbody></table></div>';
+  if(!s.policy.file) out+='<p class="muted">This hub runs without a policy file, so it can\'t have named agents. Start it with <code>--policy</code>.</p>';
+  return out+'</section>';
 }
 
 // ---------- activity ----------
@@ -281,6 +298,8 @@ function describe(e){
   case 'node_disconnected_by_admin': return {t,kind:'machine',k:'machine',who:e.node+' turned off in the console',what:'by '+String(e.by||'').replace(/@.*/,''),result:'kept out',cls:'warn'};
   case 'node_allowed': return {t,kind:'machine',k:'machine',who:e.node+' allowed to connect again',what:'',result:'allowed',cls:'ok'};
   case 'node_refused': return {t,kind:'machine',k:'machine',who:e.node+' tried to connect',what:'from '+String(e.remote||'').replace(/:\d+$/,''),result:'refused: disconnected',cls:'muted'};
+  case 'agent_created': return {t,kind:'agent',k:'other',who:'Agent '+e.agent+' got its own token',what:'by '+String(e.by||'').replace(/@.*/,''),result:'created',cls:'ok'};
+  case 'agent_removed': return {t,kind:'agent',k:'other',who:'Agent '+e.agent+' removed',what:'by '+String(e.by||'').replace(/@.*/,''),result:'token revoked',cls:''};
   case 'policy_reloaded': return {t,kind:'policy',k:'policy',who:'Policy reloaded',what:e.rules+' rules, default '+e.default,result:'ok',cls:''};
   case 'policy_reload_failed': return {t,kind:'policy',k:'policy',who:'Policy file has an error',what:e.error,result:'kept the old one',cls:'bad',bad:true};
   case 'node_auth_failed': case 'agent_auth_failed': case 'admin_auth_failed':
@@ -321,6 +340,8 @@ document.addEventListener('click',async e=>{
     const w=b.dataset.what;
     if(w==='code') return copy(s.join_code,w,b);
     if(w==='cmd') return copy($('#acmd').textContent.replace('<join code>',s.join_code),w,b);
+    if(w==='created') return copy(snippet(true,C.created.token)[1],w,b);
+    if(w==='createdTok') return copy(C.created.token,w,b);
     return copy(snippet(true)[1],w,b);
   }
   case 'checkAgent': {
@@ -341,6 +362,17 @@ document.addEventListener('click',async e=>{
   case 'disconnect':
     if(!confirm('Disconnect '+b.dataset.name+'? Agents lose it right away, and it stays out until you let it connect again (Machines → Disconnected).')) return;
     try{await post('nodes/disconnect',{name:b.dataset.name,by:'console'})}catch(err){alert(err.message)} await load(); break;
+  case 'addAgent': C.adding=true; render(true); $('#agentName').focus(); return;
+  case 'cancelAgent': C.adding=false; break;
+  case 'doneAgent': C.created=null; break;
+  case 'createAgent': {
+    const name=$('#agentName').value.trim();
+    try{const r=await post('agents/create',{name,by:'console'}); C.created=await r.json(); C.adding=false}catch(err){alert(err.message)}
+    await load(true); break;
+  }
+  case 'removeAgent':
+    if(!confirm('Remove agent '+b.dataset.name+'? Its token stops working at once.')) return;
+    try{await post('agents/remove',{name:b.dataset.name,by:'console'})}catch(err){alert(err.message)} await load(true); break;
   case 'allowNode': try{await post('nodes/allow',{name:b.dataset.name,by:'console'})}catch(err){alert(err.message)} await load(); break;
   default: return;
   }
@@ -356,7 +388,10 @@ document.addEventListener('change',e=>{
   if(id==='dur'){store.set('relayDur',e.target.value); render(true)}
   if(id==='aexec'||id==='ainst'){A[id==='aexec'?'exec':'install']=e.target.checked; render(true)}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='tok') document.querySelector('[data-act=signin]').click()});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.id==='tok') document.querySelector('[data-act=signin]').click();
+  if(e.key==='Enter'&&e.target.id==='agentName') document.querySelector('[data-act=createAgent]').click();
+});
 window.addEventListener('hashchange',async()=>{if(route()==='add') A.known=null; C.check=''; await load(); render(true); $('#main').focus?.()});
 
 (async()=>{

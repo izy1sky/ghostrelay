@@ -371,7 +371,13 @@ out matches anything.
   root as case-insensitive (see [One API for every OS](#one-api-for-every-os)).
 - **Windows paths:** `/` or `\`, and `..` can't climb past the drive.
 - **Named agents:** give each agent machine its own token, and list only its
-  sha256 in the policy. Then rules can treat your Mac differently from a CI box.
+  sha256 in the policy. Then rules can treat your Mac differently from a CI box,
+  the activity log names who did what, and removing one cuts off only that
+  agent. The easy way: console → **Connect an agent** → **New agent token**,
+  give it a name, and copy the token and the ready-made `claude mcp add` line
+  (shown once; the hub keeps only the fingerprint). **Remove** takes it away
+  again. By hand: `relay token`, then `echo <token> | relay hash`, and add
+  `{"name": "laptop", "token_sha256": "<hash>"}` to `"agents"`.
 - **Hot reload:** the file is re-read within 2 s of a change. An invalid edit is
   rejected (logged as `policy_reload_failed`) and the old policy stays in force.
 - **Test a policy before relying on it:**

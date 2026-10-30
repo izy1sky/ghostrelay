@@ -42,6 +42,8 @@ type server struct {
 	grants  *grantStore
 	blocked *blockStore // machines the console disconnected
 
+	agentsMu sync.Mutex // the console editing the policy's agents
+
 	// for the console: what to put in join codes and agent setup, and the log it shows
 	pubURL, listen, auditPath string
 	tls                       bool
@@ -139,6 +141,8 @@ func runServe(args []string) {
 	mux.HandleFunc("/admin/api/nodes", s.handleNodes)
 	mux.HandleFunc("/admin/api/nodes/disconnect", s.handleDisconnect)
 	mux.HandleFunc("/admin/api/nodes/allow", s.handleAllow)
+	mux.HandleFunc("/admin/api/agents/create", s.handleAgentCreate)
+	mux.HandleFunc("/admin/api/agents/remove", s.handleAgentRemove)
 	mux.HandleFunc("/admin/api/setup", s.handleSetup)
 	mux.HandleFunc("/admin/api/activity", s.handleActivity)
 	mux.HandleFunc("/node", s.handleNode)
