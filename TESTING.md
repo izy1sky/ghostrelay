@@ -679,6 +679,19 @@ Back on the page: **Stop sharing for good** → **Leave the hub** → confirm. �
 `~/relay-test/ui/node.json` and its `node.*` files are gone, and the page shows
 the hub card only. Ctrl-C `./relay`: ✅ the hub it started stops too.
 
+### 14.5 Disconnect, pause, leave, update
+
+With the hub and a shared computer from 14.1–14.2 running:
+
+| | Do | You should see |
+|---|---|---|
+| 14.5a | Console → the machine's card → **Disconnect** | it leaves *Machines* and appears under *Disconnected*; its relay page says *The hub disconnected this computer* |
+| 14.5b | restart the hub (Ctrl-C `./relay`, run it again, **Start the hub**) | still under *Disconnected*: the list is kept in `server/blocked.json` |
+| 14.5c | **Let it connect again** | back in *Machines* within a minute, without touching the machine |
+| 14.5d | `./relay pause`, then `./relay resume` | it disappears from the console within 2 s, and comes back |
+| 14.5e | `./relay leave` | `node.json` is gone, the node process exits by itself, and a background service (if any) is removed |
+| 14.5f | `./relay update --check` | this copy's version, the background copy's (or *none*) and the newest release |
+
 ---
 
 ## Cleanup

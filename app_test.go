@@ -1,12 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -176,5 +180,88 @@ func TestReadTail(t *testing.T) {
 	b, _ = readTail(f, 1000)
 	if !strings.HasPrefix(string(b), "first") {
 		t.Errorf("whole file: %q", b)
+	}
+}
+
+func TestNewerVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.8.1", "0.8.0", true}, {"v0.9.0", "0.8.9", true}, {"1.0.0", "0.99.99", true},
+		{"0.8.0", "0.8.0-dev", true}, {"0.8.0-dev", "0.8.0", false}, {"0.8.0", "0.8.0", false},
+		{"0.7.9", "0.8.0", false}, {"bogus", "0.8.0", false},
+	} {
+		if got := newerVersion(c.a, c.b); got != c.want {
+			t.Errorf("newerVersion(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
+func TestPauseResumeLeaveCLI(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "node.json")
+	if err := setPaused(cfg, true); err == nil {
+		t.Error("pausing a computer that isn't shared should fail")
+	}
+	writeJSON0600(cfg, map[string]any{"server": "http://s:1", "token": "t", "name": "box"})
+	l := &nodeLocal{cfg: cfg}
+	setPaused(cfg, true)
+	if !l.paused() {
+		t.Error("pause")
+	}
+	setPaused(cfg, false)
+	if l.paused() || l.gone() {
+		t.Error("resume")
+	}
+	if err := leaveNode(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !l.gone() {
+		t.Error("after leave a running node must see its settings are gone, and stop")
+	}
+	l.set("connected", "") // a node still running must not recreate its files
+	if _, err := os.Stat(sidecar(cfg, ".status.json")); err == nil {
+		t.Error("status file written after leave")
+	}
+}
+
+func TestReplaceFileAndUnpack(t *testing.T) {
+	dir := t.TempDir()
+	dst, src := filepath.Join(dir, "relay"), filepath.Join(dir, "new")
+	os.WriteFile(dst, []byte("old"), 0o755)
+	os.WriteFile(src, []byte("new"), 0o755)
+	if err := replaceFile(dst, src); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Errorf("dst = %q", b)
+	}
+	if _, err := os.Stat(dst + ".old"); err == nil {
+		t.Error(".old left behind")
+	}
+
+	exe := "relay"
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
+	var tgz bytes.Buffer
+	gw := gzip.NewWriter(&tgz)
+	tw := tar.NewWriter(gw)
+	for _, f := range []struct{ name, body string }{{"relay_x/README.md", "readme"}, {"relay_x/" + exe, "binary"}} {
+		tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(f.body)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(f.body))
+	}
+	tw.Close()
+	gw.Close()
+	if b, err := unpackBinary(tgz.Bytes(), false); err != nil || string(b) != "binary" {
+		t.Errorf("tar.gz: %q %v", b, err)
+	}
+	var zb bytes.Buffer
+	zw := zip.NewWriter(&zb)
+	w, _ := zw.Create("relay_x/" + exe)
+	w.Write([]byte("binary"))
+	zw.Close()
+	if b, err := unpackBinary(zb.Bytes(), true); err != nil || string(b) != "binary" {
+		t.Errorf("zip: %q %v", b, err)
 	}
 }

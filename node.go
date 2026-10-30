@@ -127,6 +127,10 @@ func runNode(args []string) {
 	a.local = newNodeLocal(settings, a.url)
 	backoff := time.Second
 	for {
+		if a.local.gone() {
+			log.Printf("settings %s were removed (relay leave); stopping", settings)
+			return
+		}
 		if a.local.paused() {
 			if a.local.state() != "paused" {
 				log.Printf("paused: %s exists; staying disconnected until it's removed", sidecar(settings, ".paused"))
@@ -141,7 +145,20 @@ func runNode(args []string) {
 		if connected {
 			backoff = time.Second
 		}
-		if a.local.paused() {
+		if a.local.paused() || a.local.gone() {
+			continue
+		}
+		if websocket.CloseStatus(err) == closeDisconnected {
+			// The hub's owner turned this machine off in the console. Ask
+			// again every minute, so it comes back once they allow it.
+			if a.local.state() != "disconnected" {
+				log.Printf("the hub's owner disconnected this machine; asking again every minute")
+			}
+			a.local.set("disconnected", "")
+			backoff = time.Second
+			for i := 0; i < 30 && !a.local.paused() && !a.local.gone(); i++ {
+				time.Sleep(2 * time.Second)
+			}
 			continue
 		}
 		a.local.set("connecting", err.Error())
@@ -216,7 +233,7 @@ func (a *nodeAgent) session() (connected bool, err error) {
 	err = wsjson.Read(hctx, c, &welcome)
 	cancel()
 	if err != nil || welcome.Type != msgWelcome {
-		return false, fmt.Errorf("no welcome from server: %v", err)
+		return false, fmt.Errorf("no welcome from server: %w", err)
 	}
 	log.Printf("connected as %q", a.info.Name)
 	a.local.set("connected", "")
@@ -232,7 +249,7 @@ func (a *nodeAgent) session() (connected bool, err error) {
 			case <-linkCtx.Done():
 				return
 			case <-t.C:
-				if a.local.paused() {
+				if a.local.paused() || a.local.gone() {
 					c.Close(websocket.StatusNormalClosure, "paused on the node")
 					return
 				}

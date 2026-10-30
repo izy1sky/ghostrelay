@@ -104,7 +104,7 @@ const H=()=>({'Authorization':'Bearer '+TOK,'Content-Type':'application/json'});
 async function get(p){const r=await fetch('api/'+p,{headers:H()}); if(r.status===401) throw new Error('auth'); if(!r.ok) throw new Error(await r.text()); return r.json()}
 async function post(p,b){const r=await fetch('api/'+p,{method:'POST',headers:H(),body:JSON.stringify(b)}); if(!r.ok) throw new Error(await r.text()); return r}
 
-const D={setup:null,nodes:[],pending:[],grants:[],activity:[]};
+const D={setup:null,nodes:[],disconnected:[],pending:[],grants:[],activity:[]};
 const A={os:'windows',arch:'amd64',name:'',root:'',exec:true,install:true,showCode:false,known:null,copied:''};
 const C={tab:'claude',show:false,check:''};
 const F={kind:'all',q:''};
@@ -124,7 +124,7 @@ async function load(full){
     const jobs=[get('pending'),get('grants'),get('nodes')];
     if(full||!D.setup) jobs.push(get('setup'));
     const [p,g,n,s]=await Promise.all(jobs);
-    D.pending=p; D.grants=g; D.nodes=n; if(s) D.setup=s;
+    D.pending=p; D.grants=g; D.nodes=n.connected||[]; D.disconnected=n.disconnected||[]; if(s) D.setup=s;
     if(['machines','activity'].includes(route())) D.activity=await get('activity?limit=300');
     authFailed=false;
   }catch(e){ if(e.message==='auth') authFailed=true; }
@@ -166,8 +166,12 @@ function machines(){
       '<div class="row" style="gap:6px"><span class="pill">'+esc(m.os+' · '+m.arch)+'</span><span class="pill">'+esc(m.shell_kind||m.shell)+'</span>'+(m.allow_exec?'<span class="pill ok">commands on</span>':'<span class="pill">files only</span>')+(old?'<span class="pill warn">relay '+esc(m.version)+'</span>':'')+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Folders</span>'+(m.roots||[]).map(r=>'<span class="mono" style="font-size:13px;word-break:break-all">'+esc(r)+'</span>').join('')+'</div>'+
       (tools?'<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Found on PATH</span><span class="mono muted">'+esc(tools)+'</span></div>':'')+
-      '<div class="row muted" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:10px"><span>relay '+esc(m.version)+' · '+esc(m.hostname)+'</span><span class="mono">'+esc((m.remote||'').replace(/:\d+$/,''))+'</span></div></article>';
+      (old?'<p class="muted">Older than the hub (relay '+esc(s.version)+'). On that computer, run <code>relay update</code> or use Update on its relay page.</p>':'')+
+      '<div class="row muted" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:10px"><span>relay '+esc(m.version)+' · '+esc(m.hostname)+'</span><span class="mono">'+esc((m.remote||'').replace(/:\d+$/,''))+'</span></div>'+
+      '<div><button class="btn small no" data-act="disconnect" data-name="'+esc(m.name)+'">Disconnect</button></div></article>';
   }).join('')+'<a href="#add" class="empty" style="display:flex;flex-direction:column;justify-content:center;gap:6px;min-height:200px;text-decoration:none"><span style="font-size:15px;color:var(--fg)">+ Add '+(n.length?'another':'a')+' machine</span><span>No open port needed on it</span></a></div>';
+  if(D.disconnected.length) out+='<section style="display:flex;flex-direction:column;gap:10px"><h2>Disconnected · '+D.disconnected.length+'</h2><p class="muted" style="font-size:14px">You turned these off. They can\'t connect until you let them; each one asks again every minute and says so on its own relay page.</p><div class="tbl"><table><tbody>'+
+    D.disconnected.map(b=>'<tr><td class="mono"><b>'+esc(b.name)+'</b></td><td class="muted">since '+esc(new Date(b.at).toLocaleString())+(b.by?' · by '+esc(String(b.by).replace(/@.*/,'')):'')+'</td><td style="text-align:right"><button class="btn small" data-act="allowNode" data-name="'+esc(b.name)+'">Let it connect again</button></td></tr>').join('')+'</tbody></table></div></section>';
   const recent=D.activity.slice(0,5).map(describe);
   if(recent.length) out+='<section style="display:flex;flex-direction:column;gap:10px"><div class="row" style="justify-content:space-between"><h2>Recent activity</h2><a href="#activity">See all</a></div><div class="tbl"><table><tbody>'+recent.map(rowHTML).join('')+'</tbody></table></div></section>';
   return out;
@@ -274,6 +278,9 @@ function describe(e){
   case 'grant_revoked': return {t,kind:'grant',k:'approval',who:'Grant '+e.id+' revoked',what:e.scope,result:'revoked',cls:''};
   case 'node_connected': return {t,kind:'machine',k:'machine',who:e.node+' connected',what:'from '+String(e.remote||'').replace(/:\d+$/,''),result:'online',cls:'ok'};
   case 'node_disconnected': return {t,kind:'machine',k:'machine',who:e.node+' disconnected',what:'',result:'offline',cls:''};
+  case 'node_disconnected_by_admin': return {t,kind:'machine',k:'machine',who:e.node+' turned off in the console',what:'by '+String(e.by||'').replace(/@.*/,''),result:'kept out',cls:'warn'};
+  case 'node_allowed': return {t,kind:'machine',k:'machine',who:e.node+' allowed to connect again',what:'',result:'allowed',cls:'ok'};
+  case 'node_refused': return {t,kind:'machine',k:'machine',who:e.node+' tried to connect',what:'from '+String(e.remote||'').replace(/:\d+$/,''),result:'refused: disconnected',cls:'muted'};
   case 'policy_reloaded': return {t,kind:'policy',k:'policy',who:'Policy reloaded',what:e.rules+' rules, default '+e.default,result:'ok',cls:''};
   case 'policy_reload_failed': return {t,kind:'policy',k:'policy',who:'Policy file has an error',what:e.error,result:'kept the old one',cls:'bad',bad:true};
   case 'node_auth_failed': case 'agent_auth_failed': case 'admin_auth_failed':
@@ -331,6 +338,10 @@ document.addEventListener('click',async e=>{
   }
   case 'allowAll': await Promise.all(b.dataset.ids.split(',').map(id=>post('decide',{id,decision:'allow',by:'console'}).catch(()=>{}))); await load(); break;
   case 'revoke': try{await post('grants/revoke',{id:b.dataset.id,by:'console'})}catch(err){alert(err.message)} await load(); break;
+  case 'disconnect':
+    if(!confirm('Disconnect '+b.dataset.name+'? Agents lose it right away, and it stays out until you let it connect again (Machines → Disconnected).')) return;
+    try{await post('nodes/disconnect',{name:b.dataset.name,by:'console'})}catch(err){alert(err.message)} await load(); break;
+  case 'allowNode': try{await post('nodes/allow',{name:b.dataset.name,by:'console'})}catch(err){alert(err.message)} await load(); break;
   default: return;
   }
   render(true);

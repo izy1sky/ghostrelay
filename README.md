@@ -66,7 +66,17 @@ the commands below.
 
 The hub's **console** is at `http://<hub>:<port>/admin/`: machines, adding one
 (join code and a ready-made command per OS), approvals and grants, connecting
-Claude Code or Cursor, and the activity log.
+Claude Code or Cursor, and the activity log. **Disconnect** on a machine's card
+drops it and keeps it out, also across hub restarts, until **Let it connect
+again**; the machine stops retrying quickly and says why on its own page.
+Machines are told apart by name here, since they share the node token: to lock
+out a machine you don't trust, give the hub new tokens (`relay init --force`).
+
+**Updating.** A background service runs its own copy, `~/.relay/bin/relay`, so
+downloading a newer relay doesn't change it by itself. `relay update` (or
+**Update** on the page) replaces both copies and restarts the services; running
+a newer download's page also offers to put it in place of an older background
+copy.
 
 ### Or with three commands, one per machine
 
@@ -114,7 +124,10 @@ Day to day:
 | `relay approvals`, `relay approve <id> [--similar\|--node] [--for 1h]`, `relay deny <id>` | decide calls the policy asks about (on the server, no setup needed) |
 | `relay grants`, `relay grants revoke <id>` | see and end the grants that let calls through without asking |
 | `relay invite` | the join code and agent command again |
-| `relay` | this computer's page: status, pause, leave, or set something up |
+| `relay` | this computer's page: status, pause, leave, update, or set something up |
+| `relay pause` / `relay resume` | stop sharing this computer for now, and start again (a running node, service or not, follows within 2 s) |
+| `relay leave` | stop sharing for good: removes the background service and the settings; a node running in a terminal stops by itself |
+| `relay update` (`--check`) | get the newest release from GitHub (checked against `SHA256SUMS`) for this copy **and** the copy background services run, then restart them |
 
 Settings live in `~/.relay` (`RELAY_HOME` moves it): `server/server.json`,
 `server/policy.json` and `node.json`. They hold tokens, so they are only

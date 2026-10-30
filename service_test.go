@@ -26,16 +26,32 @@ func testService(t *testing.T, role string) *service {
 	return s
 }
 
+// suffixed matches "<base>-<6 hex>": with RELAY_HOME set, names carry a hash
+// of that folder, so a test setup can't drive the services of ~/.relay.
+func suffixed(id, base string) bool {
+	rest, ok := strings.CutPrefix(id, base+"-")
+	return ok && len(rest) == 6 && strings.Trim(rest, "0123456789abcdef") == ""
+}
+
 func TestServiceNames(t *testing.T) {
 	n := testService(t, "node")
-	if n.id != "ghostrelay-node-box" || n.label() != "dev.ghostrelay.node.box" {
+	if !suffixed(n.id, "ghostrelay-node-box") || !strings.HasPrefix(n.label(), "dev.ghostrelay.node.box-") {
 		t.Errorf("node: id %q label %q", n.id, n.label())
 	}
 	if got := n.args(); got[0] != "node" || got[2] != n.cfg || got[4] != n.logPath {
 		t.Errorf("args %v", got)
 	}
-	if s := testService(t, "server"); s.id != "ghostrelay-server" || s.label() != "dev.ghostrelay.server" {
+	if s := testService(t, "server"); !suffixed(s.id, "ghostrelay-server") {
 		t.Errorf("server: id %q label %q", s.id, s.label())
+	}
+	if other := testService(t, "node"); other.id == n.id {
+		t.Errorf("two settings folders, one name: both %q", n.id)
+	}
+	cfg := filepath.Join(t.TempDir(), "node.json")
+	writeJSON0600(cfg, map[string]any{"name": "box"})
+	t.Setenv("RELAY_HOME", "")
+	if d, err := newService("node", cfg); err != nil || d.id != "ghostrelay-node-box" || d.label() != "dev.ghostrelay.node.box" {
+		t.Errorf("default home keeps plain names: %+v %v", d, err)
 	}
 	if _, err := newService("node", filepath.Join(t.TempDir(), "missing.json")); err == nil || !strings.Contains(err.Error(), "relay join") {
 		t.Errorf("missing settings: %v", err)
@@ -71,7 +87,7 @@ func TestSystemdUnit(t *testing.T) {
 func TestTaskScript(t *testing.T) {
 	s := testService(t, "node")
 	sc := s.taskScript()
-	if !strings.Contains(sc, "''home''") || !strings.Contains(sc, "-AtLogOn") || !strings.Contains(sc, "'ghostrelay-node-box'") {
+	if !strings.Contains(sc, "''home''") || !strings.Contains(sc, "-AtLogOn") || !strings.Contains(sc, "'"+s.id+"'") {
 		t.Errorf("script:\n%s", sc)
 	}
 }
