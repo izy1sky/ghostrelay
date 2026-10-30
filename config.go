@@ -225,45 +225,51 @@ func runInit(args []string) {
 	force := fs.Bool("force", false, "overwrite existing settings (new tokens: existing nodes and agents must be re-added)")
 	fs.Parse(args)
 
-	pol, ok := policyPresets[*preset]
+	cfg, cfgPath, err := initServer(*dir, *listen, *pubURL, *preset, *force)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Wrote %s and policy.json (preset %q).\n\n", cfgPath, *preset)
+	if w := portMismatch(*listen, cfg["url"].(string)); w != "" {
+		fmt.Println(w + "\n")
+	}
+	printInvite(cfg, cfgPath)
+}
+
+// initServer writes a server's settings and starting policy into dir, with
+// fresh tokens. pubURL defaults to this machine's LAN address.
+func initServer(dir, listen, pubURL, preset string, force bool) (map[string]any, string, error) {
+	pol, ok := policyPresets[preset]
 	if !ok {
-		log.Fatalf("unknown --policy %q (workspace, ask, readonly or open)", *preset)
+		return nil, "", fmt.Errorf("unknown policy %q (workspace, ask, readonly or open)", preset)
 	}
-	cfgPath := filepath.Join(*dir, "server.json")
-	if _, err := os.Stat(cfgPath); err == nil && !*force {
-		log.Fatalf("%s already exists. Print its join code with: relay invite   (or start over with --force)", cfgPath)
+	cfgPath := filepath.Join(dir, "server.json")
+	if _, err := os.Stat(cfgPath); err == nil && !force {
+		return nil, "", fmt.Errorf("%s already exists. Print its join code with: relay invite   (or start over with --force)", cfgPath)
 	}
-	if *pubURL == "" {
-		*pubURL = guessURL(*listen)
+	if pubURL == "" {
+		pubURL = guessURL(listen)
 	}
-	if _, err := nodeURL(*pubURL); err != nil {
-		log.Fatalf("--url: %v", err)
+	if _, err := nodeURL(pubURL); err != nil {
+		return nil, "", fmt.Errorf("--url: %v", err)
 	}
 	cfg := map[string]any{
 		"#":           "relay serve settings, written by relay init. Keys are relay serve flag names. Keep this file private.",
-		"listen":      *listen,
-		"url":         strings.TrimRight(*pubURL, "/"),
+		"listen":      listen,
+		"url":         strings.TrimRight(pubURL, "/"),
 		"node-token":  newToken(),
 		"agent-token": newToken(),
 		"admin-token": newToken(),
 		"policy":      "policy.json",
 		"audit":       "audit.jsonl",
 	}
-	if err := os.MkdirAll(*dir, 0o700); err != nil {
-		log.Fatal(err)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", err
 	}
-	polPath := filepath.Join(*dir, "policy.json")
-	if err := writePrivate(polPath, []byte(pol)); err != nil {
-		log.Fatal(err)
+	if err := writePrivate(filepath.Join(dir, "policy.json"), []byte(pol)); err != nil {
+		return nil, "", err
 	}
-	if err := writeJSON0600(cfgPath, cfg); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Wrote %s and policy.json (preset %q).\n\n", cfgPath, *preset)
-	if w := portMismatch(*listen, *pubURL); w != "" {
-		fmt.Println(w + "\n")
-	}
-	printInvite(cfg, cfgPath)
+	return cfg, cfgPath, writeJSON0600(cfgPath, cfg)
 }
 
 func runInvite(args []string) {
@@ -312,21 +318,26 @@ The join code and tokens are secrets. Print this again with: relay invite
 	}
 }
 
-// guessURL builds http://<LAN IP>:<port> from a listen address. Dialing UDP
-// sends no packets; it only picks the interface with the default route.
+// guessURL builds http://<LAN IP>:<port> from a listen address.
 func guessURL(listen string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		port = "8787"
 	}
 	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-		if c, err := net.Dial("udp", "192.0.2.1:9"); err == nil {
-			host = c.LocalAddr().(*net.UDPAddr).IP.String()
-			c.Close()
-		}
+		host = lanIP()
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// lanIP is this machine's address on the network with the default route.
+// Dialing UDP sends no packets; it only picks the interface.
+func lanIP() string {
+	if c, err := net.Dial("udp", "192.0.2.1:9"); err == nil {
+		defer c.Close()
+		return c.LocalAddr().(*net.UDPAddr).IP.String()
+	}
+	return "127.0.0.1"
 }
 
 // portMismatch warns when the public url names a different port than the
@@ -375,47 +386,11 @@ func runJoin(args []string) {
 	if len(pos) != 1 {
 		log.Fatal("usage: relay join <code> --root <folder> [--name N] [--allow-exec] [--install]\n  get the code on the server with: relay invite")
 	}
-	j, err := decodeJoin(pos[0])
+	abs, err := saveJoin(pos[0], *name, roots, *allowExec, *cfgPath, func(server string) { fmt.Printf("checking %s ... ", server) })
 	if err != nil {
 		log.Fatal(err)
 	}
-	if len(roots) == 0 {
-		log.Fatal("give at least one --root: the folder agents may use on this machine")
-	}
-	if !validName.MatchString(*name) {
-		log.Fatalf("invalid --name %q (letters, digits, - _ .)", *name)
-	}
-	var absRoots []string
-	for _, r := range roots {
-		abs, err := filepath.Abs(r)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
-			log.Fatalf("--root %s is not a folder", abs)
-		}
-		absRoots = append(absRoots, abs)
-	}
-	fmt.Printf("checking %s ... ", j.Server)
-	if err := checkNodeToken(j.Server, j.Token); err != nil {
-		fmt.Println("failed")
-		log.Fatal(err)
-	}
-	fmt.Println("ok")
-
-	cfg := map[string]any{
-		"#":          "relay node settings, written by relay join. Keys are relay node flag names. Keep this file private.",
-		"server":     j.Server,
-		"token":      j.Token,
-		"name":       *name,
-		"root":       absRoots,
-		"allow-exec": *allowExec,
-	}
-	abs, _ := filepath.Abs(*cfgPath)
-	if err := writeJSON0600(abs, cfg); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("saved %s\n", abs)
+	fmt.Printf("ok\nsaved %s\n", abs)
 	if *install {
 		if err := serviceInstall("node", abs); err != nil {
 			log.Fatal(err)
@@ -424,6 +399,48 @@ func runJoin(args []string) {
 	}
 	fmt.Println("running in this terminal; Ctrl-C stops it. To keep it running after logout and reboots: relay service install")
 	runNode([]string{"--config", abs})
+}
+
+// saveJoin checks a join code against its server and saves a node's settings.
+// checking, if set, is called with the server's address before it is asked.
+func saveJoin(code, name string, roots []string, allowExec bool, cfgPath string, checking func(server string)) (string, error) {
+	j, err := decodeJoin(code)
+	if err != nil {
+		return "", err
+	}
+	if len(roots) == 0 {
+		return "", errors.New("give at least one --root: the folder agents may use on this machine")
+	}
+	if !validName.MatchString(name) {
+		return "", fmt.Errorf("invalid name %q (letters, digits, - _ .)", name)
+	}
+	var absRoots []string
+	for _, r := range roots {
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			return "", err
+		}
+		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("%s is not a folder", abs)
+		}
+		absRoots = append(absRoots, abs)
+	}
+	if checking != nil {
+		checking(j.Server)
+	}
+	if err := checkNodeToken(j.Server, j.Token); err != nil {
+		return "", err
+	}
+	cfg := map[string]any{
+		"#":          "relay node settings, written by relay join. Keys are relay node flag names. Keep this file private.",
+		"server":     j.Server,
+		"token":      j.Token,
+		"name":       name,
+		"root":       absRoots,
+		"allow-exec": allowExec,
+	}
+	abs, _ := filepath.Abs(cfgPath)
+	return abs, writeJSON0600(abs, cfg)
 }
 
 // ---- policy presets --------------------------------------------------------------

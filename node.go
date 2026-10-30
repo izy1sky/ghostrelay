@@ -33,6 +33,7 @@ type nodeAgent struct {
 	sem     chan struct{}
 	jobs    *jobManager
 	uploads *uploads
+	local   *nodeLocal
 }
 
 type multiFlag []string
@@ -123,12 +124,27 @@ func runNode(args []string) {
 
 	log.Printf("relay node %q -> %s  %s/%s shell=%s roots=%v case-insensitive=%v exec=%v",
 		a.info.Name, a.url, a.info.OS, a.info.Arch, a.info.ShellKind, a.roots, caseInsensitive, a.info.AllowExec)
+	a.local = newNodeLocal(settings, a.url)
 	backoff := time.Second
 	for {
+		if a.local.paused() {
+			if a.local.state() != "paused" {
+				log.Printf("paused: %s exists; staying disconnected until it's removed", sidecar(settings, ".paused"))
+			}
+			a.local.set("paused", "")
+			backoff = time.Second
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		a.local.set("connecting", "")
 		connected, err := a.session()
 		if connected {
 			backoff = time.Second
 		}
+		if a.local.paused() {
+			continue
+		}
+		a.local.set("connecting", err.Error())
 		log.Printf("link down: %v; reconnecting in %s", err, backoff)
 		time.Sleep(backoff + time.Duration(rand.Int64N(int64(backoff/4)+1)))
 		backoff = min(backoff*2, 30*time.Second)
@@ -142,7 +158,7 @@ func sanitizeName(s string) string {
 		}
 		return '-'
 	}, s)
-	s = strings.Trim(s, "-.")
+	s = strings.Trim(strings.TrimSuffix(s, ".local"), "-.") // macOS: mbp.local -> mbp
 	if s == "" {
 		return "node"
 	}
@@ -203,10 +219,26 @@ func (a *nodeAgent) session() (connected bool, err error) {
 		return false, fmt.Errorf("no welcome from server: %v", err)
 	}
 	log.Printf("connected as %q", a.info.Name)
+	a.local.set("connected", "")
 
 	// Everything running on this link is cancelled when the link ends.
 	linkCtx, cancelLink := context.WithCancel(context.Background())
 	defer cancelLink()
+	go func() { // pausing (from the local page) drops the link
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-linkCtx.Done():
+				return
+			case <-t.C:
+				if a.local.paused() {
+					c.Close(websocket.StatusNormalClosure, "paused on the node")
+					return
+				}
+			}
+		}
+	}()
 	go func() {
 		t := time.NewTicker(20 * time.Second)
 		defer t.Stop()
@@ -255,6 +287,7 @@ func (a *nodeAgent) session() (connected bool, err error) {
 				a.sem <- struct{}{}
 				res, err := a.dispatch(ctx, m.Op, m.Args)
 				<-a.sem
+				a.local.record(m.Op, m.Args, err)
 				out := &Msg{Type: msgRes, ID: m.ID}
 				if err != nil {
 					out.Error = err.Error()

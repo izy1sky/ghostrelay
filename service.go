@@ -213,6 +213,19 @@ func (s *service) uninstall() error {
 	return err
 }
 
+// installed reports whether the service is set up, whatever its state.
+func (s *service) installed() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		_, err := os.Stat(s.plistPath())
+		return err == nil
+	case "linux":
+		_, err := os.Stat(s.unitPath())
+		return err == nil
+	}
+	return s.status() != "not installed"
+}
+
 func (s *service) status() string {
 	switch runtime.GOOS {
 	case "darwin":

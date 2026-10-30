@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>relay console</title>
+<style>
+:root{--bg:#0b0f14;--side:#0d1218;--panel:#11171f;--panel2:#161e28;--line:#243041;--line2:#2b3a4d;--fg:#e6edf3;--soft:#c3ccd6;--muted:#9aa7b6;
+  --green:#39d353;--green-bg:#12251a;--green-line:#1f4a2a;--on-green:#0b0f14;--amber:#e3b341;--amber-bg:#1a1609;--amber-line:#5a4720;--amber-text:#d8cfae;
+  --red:#ff7b72;--red-bg:#2a1414;--red-line:#5c2b2b;--blue:#79c0ff;--blue-bg:#0f1a26;--blue-line:#24405e;--code:#070a0e;--code-fg:#c9f7d2}
+@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--side:#eef1f4;--panel:#fff;--panel2:#f0f3f6;--line:#d8dee4;--line2:#c4ccd4;--fg:#1f2328;--soft:#424a53;--muted:#59636e;
+  --green:#1a7f37;--green-bg:#e9f7ee;--green-line:#a6dcb6;--on-green:#fff;--amber:#9a6700;--amber-bg:#fff8e5;--amber-line:#eac54f;--amber-text:#6b4c00;
+  --red:#cf222e;--red-bg:#ffebe9;--red-line:#ffb8b3;--blue:#0969da;--blue-bg:#ddf4ff;--blue-line:#9cd1ff;--code:#f6f8fa;--code-fg:#116329}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--blue)}
+.mono,code,pre,.field.mono{font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace}
+.shell{min-height:100vh;display:flex;flex-wrap:wrap}
+aside{flex:1 1 232px;padding:22px 14px;border-right:1px solid var(--line);background:var(--side);display:flex;flex-direction:column;gap:24px}
+main{flex:999 1 560px;min-width:0;padding:30px 36px 56px;display:flex;flex-direction:column;gap:24px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px;font-weight:700;font-size:17px}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:14px;min-height:44px}
+nav a:hover{background:var(--panel2);color:var(--fg)}
+nav a[aria-current=page]{background:var(--green-bg);color:var(--green)}
+.badge{margin-left:auto;background:var(--amber);color:var(--bg);font-size:12px;font-weight:700;border-radius:999px;padding:1px 8px}
+.srv{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:10px;font-size:13px;color:var(--muted)}
+h1{margin:0;font-size:27px;letter-spacing:-.02em}
+h2{margin:0;font-size:17px}
+p{margin:0}
+.sub{color:var(--muted);font-size:15px}
+.muted{color:var(--muted);font-size:13px}
+.label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:14px;padding:9px 14px;min-height:42px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--fg);cursor:pointer;text-decoration:none;text-align:left}
+.btn:hover{border-color:var(--muted)}
+.btn.go{background:var(--green);border-color:var(--green);color:var(--on-green);font-weight:600}
+.btn.no{color:var(--red);border-color:var(--red-line)}
+.btn.small{min-height:34px;padding:5px 11px;font-size:13px}
+.btn:has(small){flex-direction:column;align-items:flex-start;gap:0}
+.btn small{display:block;color:var(--muted);font-size:12px;max-width:40ch;overflow-wrap:anywhere}
+.btn.go small{color:inherit;opacity:.8}
+.btn[aria-pressed=true]{background:var(--green-bg);border-color:var(--green);color:var(--green)}
+.btn:focus-visible,.field:focus,nav a:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--green);border-color:var(--green-line)} .pill.warn{color:var(--amber);border-color:var(--amber-line)} .pill.bad{color:var(--red);border-color:var(--red-line)} .pill.info{color:var(--blue);border-color:var(--blue-line)}
+.note{padding:14px 16px;border-radius:12px;border:1px solid;font-size:14px;line-height:1.55}
+.note.warn{background:var(--amber-bg);border-color:var(--amber-line);color:var(--amber-text)} .note.warn b{color:var(--amber)}
+.note.ok{background:var(--green-bg);border-color:var(--green-line)}
+.note.bad{background:var(--red-bg);border-color:var(--red-line)}
+.note ul{margin:6px 0 0;padding-left:20px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.codebox{display:flex;align-items:stretch;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--code)}
+.codebox pre{margin:0;flex:1;min-width:0;padding:14px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--code-fg)}
+.codebox .btn{border:0;border-left:1px solid var(--line2);border-radius:0;min-width:92px}
+.field{font:inherit;font-size:14px;padding:9px 11px;min-height:42px;border-radius:8px;border:1px solid var(--line2);background:var(--bg);color:var(--fg);width:100%}
+.check{display:flex;align-items:center;gap:10px;min-height:42px;cursor:pointer}
+.check input{width:18px;height:18px;accent-color:var(--green)}
+.call{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:11px 13px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;margin:0}
+.tbl{border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:11px 14px}
+td{padding:11px 14px;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line);padding:0 8px}
+.tab{font:inherit;font-size:14px;padding:12px 14px;min-height:44px;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer}
+.tab[aria-selected=true]{color:var(--green);border-bottom-color:var(--green)}
+.empty{border:1.5px dashed var(--line2);border-radius:12px;padding:36px;text-align:center;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
+details{border:1px solid var(--line);border-radius:12px;padding:2px 18px}
+summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (max-width:640px){aside{gap:12px;padding:14px 10px;border-right:0;border-bottom:1px solid var(--line)} nav{flex-direction:row;flex-wrap:wrap} nav a{padding:8px 10px} .srv{display:none} main{padding:22px 16px 48px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside>
+  <div class="brand"><svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--green)" d="M4 1h8v1h2v2h1v11h-2v-1h-2v1h-2v-1H7v1H5v-1H3v1H1V4h1V2h2z"/><path fill="var(--side)" d="M4 6h1v1h1v1H5v1H4V8h1V7H4zM8 9h4v1H8z"/></svg>ghostrelay</div>
+  <nav aria-label="Sections">
+    <a href="#machines" data-r="machines">Machines</a>
+    <a href="#add" data-r="add">Add a machine</a>
+    <a href="#approvals" data-r="approvals">Approvals<span class="badge" id="badge" hidden></span></a>
+    <a href="#agent" data-r="agent">Connect an agent</a>
+    <a href="#activity" data-r="activity">Activity</a>
+  </nav>
+  <div class="srv" id="srv"></div>
+</aside>
+<main id="main" aria-live="polite"><p class="muted">Loading…</p></main>
+</div>
+<script>
+'use strict';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s);
+const store={get(k,d){try{return localStorage.getItem(k)??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+let TOK='';
+try{TOK=sessionStorage.getItem('relayAdmin')||''}catch(e){}
+const km=location.hash.match(/k=([0-9a-f]+)/);
+if(km){TOK=km[1];try{sessionStorage.setItem('relayAdmin',TOK)}catch(e){};history.replaceState(null,'',location.pathname+'#machines')}
+
+const H=()=>({'Authorization':'Bearer '+TOK,'Content-Type':'application/json'});
+async function get(p){const r=await fetch('api/'+p,{headers:H()}); if(r.status===401) throw new Error('auth'); if(!r.ok) throw new Error(await r.text()); return r.json()}
+async function post(p,b){const r=await fetch('api/'+p,{method:'POST',headers:H(),body:JSON.stringify(b)}); if(!r.ok) throw new Error(await r.text()); return r}
+
+const D={setup:null,nodes:[],pending:[],grants:[],activity:[]};
+const A={os:'windows',arch:'amd64',name:'',root:'',exec:true,install:true,showCode:false,known:null,copied:''};
+const C={tab:'claude',show:false,check:''};
+const F={kind:'all',q:''};
+let authFailed=false;
+
+function route(){return (location.hash.replace('#','')||'machines').split('&')[0]}
+function since(t){const s=Math.max(0,(Date.now()-new Date(t))/1000); if(s<90) return 'a minute'; const m=Math.round(s/60); if(m<90) return m+' min'; const h=Math.floor(m/60); return h<48?h+' h '+(m%60)+' min':Math.floor(h/24)+' days'}
+function clock(t){return new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function mins(){return +store.get('relayDur','60')}
+function human(m){return m>=60?(m/60)+' h':m+' min'}
+function typing(){const a=document.activeElement; return a&&$('#main').contains(a)&&(a.tagName==='TEXTAREA'||(a.tagName==='INPUT'&&a.type!=='checkbox')||a.tagName==='SELECT')}
+
+// ---------- data ----------
+async function load(full){
+  if(!TOK){authFailed=true;return}
+  try{
+    const jobs=[get('pending'),get('grants'),get('nodes')];
+    if(full||!D.setup) jobs.push(get('setup'));
+    const [p,g,n,s]=await Promise.all(jobs);
+    D.pending=p; D.grants=g; D.nodes=n; if(s) D.setup=s;
+    if(['machines','activity'].includes(route())) D.activity=await get('activity?limit=300');
+    authFailed=false;
+  }catch(e){ if(e.message==='auth') authFailed=true; }
+}
+
+// ---------- shell ----------
+function renderShell(){
+  const r=route();
+  document.querySelectorAll('nav a').forEach(a=>a.setAttribute('aria-current',a.dataset.r===r?'page':'false'));
+  const b=$('#badge'); b.hidden=!D.pending.length; b.textContent=D.pending.length;
+  const s=D.setup;
+  $('#srv').innerHTML=s?'<span class="label">Hub</span><span class="mono" style="color:var(--fg);word-break:break-all">'+esc((s.url||'(no url set)').replace(/^https?:\/\//,''))+'</span><span>relay '+esc(s.version)+'</span>'+(s.tls?'<span class="pill ok" style="align-self:flex-start">https</span>':'<span class="pill warn" style="align-self:flex-start" title="tokens travel in clear">plain http</span>'):'';
+}
+function render(force){
+  renderShell();
+  if(!force&&typing()) return;
+  if(authFailed){ $('#main').innerHTML=login(); return }
+  if(!D.setup) return;
+  const v={machines,add,approvals,agent,activity}[route()]||machines;
+  const open=[...document.querySelectorAll('details[id]')].filter(d=>d.open).map(d=>d.id);
+  $('#main').innerHTML=v();
+  open.forEach(id=>{const d=document.getElementById(id); if(d) d.open=true});
+}
+function login(){
+  return '<div class="card" style="max-width:520px"><h1>Sign in to the console</h1><p class="sub">Paste the hub\'s admin token. <code>relay invite</code> prints it on the hub, and the hub\'s setup page (run <code>relay</code> there) opens the console signed in.</p>'+
+    '<label class="label" for="tok">Admin token</label><input id="tok" class="field mono" type="password" autocomplete="off"><div><button class="btn go" data-act="signin">Sign in</button></div><p class="muted">Kept in this tab only.</p></div>';
+}
+
+// ---------- machines ----------
+function machines(){
+  const n=D.nodes, s=D.setup;
+  let out='<div class="head"><div style="display:flex;flex-direction:column;gap:6px"><h1>Machines</h1><p class="sub">'+(n.length?n.length+' connected. Every agent you connect sees all of them through one address.':'No machine is connected yet.')+'</p></div><a class="btn go" href="#add">Add a machine</a></div>';
+  if(s.warning) out+='<div class="note warn"><b>Machines may fail to join.</b> '+esc(s.warning)+'</div>';
+  if(D.pending.length){const p=D.pending[0]; out+='<a href="#approvals" class="note warn" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;text-decoration:none"><b style="flex:1 1 300px">'+D.pending.length+(D.pending.length===1?' call is':' calls are')+' waiting for you</b><span class="mono" style="font-size:13px;flex:1 1 300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.agent+' → '+(p.node||'?')+': '+(p.kind==='grant'?'asks for a grant':(p.command||p.path||p.tool)))+'</span><span class="btn small">Review</span></a>'}
+  out+='<div class="grid">'+n.map(m=>{
+    const tools=Object.keys(m.tools||{}).join('  ');
+    const old=m.version!==s.version&&!/dev/.test(s.version);
+    return '<article class="card"><div class="row" style="justify-content:space-between"><h2 class="mono">'+esc(m.name)+'</h2><span style="color:var(--green);font-size:13px"><span class="dot"></span> online '+since(m.connected_at)+'</span></div>'+
+      '<div class="row" style="gap:6px"><span class="pill">'+esc(m.os+' · '+m.arch)+'</span><span class="pill">'+esc(m.shell_kind||m.shell)+'</span>'+(m.allow_exec?'<span class="pill ok">commands on</span>':'<span class="pill">files only</span>')+(old?'<span class="pill warn">relay '+esc(m.version)+'</span>':'')+'</div>'+
+      '<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Folders</span>'+(m.roots||[]).map(r=>'<span class="mono" style="font-size:13px;word-break:break-all">'+esc(r)+'</span>').join('')+'</div>'+
+      (tools?'<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Found on PATH</span><span class="mono muted">'+esc(tools)+'</span></div>':'')+
+      '<div class="row muted" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:10px"><span>relay '+esc(m.version)+' · '+esc(m.hostname)+'</span><span class="mono">'+esc((m.remote||'').replace(/:\d+$/,''))+'</span></div></article>';
+  }).join('')+'<a href="#add" class="empty" style="display:flex;flex-direction:column;justify-content:center;gap:6px;min-height:200px;text-decoration:none"><span style="font-size:15px;color:var(--fg)">+ Add '+(n.length?'another':'a')+' machine</span><span>No open port needed on it</span></a></div>';
+  const recent=D.activity.slice(0,5).map(describe);
+  if(recent.length) out+='<section style="display:flex;flex-direction:column;gap:10px"><div class="row" style="justify-content:space-between"><h2>Recent activity</h2><a href="#activity">See all</a></div><div class="tbl"><table><tbody>'+recent.map(rowHTML).join('')+'</tbody></table></div></section>';
+  return out;
+}
+
+// ---------- add a machine ----------
+function add(){
+  const s=D.setup;
+  if(A.known===null) A.known=new Set(D.nodes.map(n=>n.name));
+  const fresh=D.nodes.filter(n=>!A.known.has(n.name));
+  if(!s.join_code) return '<h1>Add a machine</h1><div class="note warn">This hub was started without <code>--url</code>, so it can\'t make join codes. Set <code>url</code> in its settings (the address machines should dial) and restart it.</div>';
+  const code=A.showCode?s.join_code:s.join_code.slice(0,8)+'••••••••••••'+s.join_code.slice(-4);
+  const def={windows:['D:\\work'],darwin:['~/Projects'],linux:['~/projects']}[A.os][0];
+  const root=A.root||def, name=A.name;
+  const q=x=>/[\s"']/.test(x)?'"'+x+'"':x;
+  const bin=A.os==='windows'?'.\\relay.exe':'./relay';
+  const cmd=(A.os==='darwin'?'xattr -d com.apple.quarantine relay\n':'')+bin+' join '+(A.showCode?s.join_code:'<join code>')+(name?' --name '+q(name):'')+' --root '+q(root)+(A.exec?' --allow-exec':'')+(A.install?' --install':'');
+  const v=s.version, rel=/^\d+\.\d+\.\d+$/.test(v);
+  const file='relay_'+(rel?v:'<version>')+'_'+A.os+'_'+A.arch+(A.os==='windows'?'.zip':'.tar.gz');
+  const dl=rel?'https://github.com/izy1sky/ghostrelay/releases/download/v'+v+'/'+file:'https://github.com/izy1sky/ghostrelay/releases/latest';
+  const pick=(k,v,l)=>'<button class="btn'+(k==='arch'?' mono':'')+'" type="button" aria-pressed="'+(A[k]===v)+'" data-act="set" data-k="'+k+'" data-v="'+v+'">'+l+'</button>';
+  return '<div style="display:flex;flex-direction:column;gap:6px"><h1>Add a machine</h1><p class="sub">The machine connects out to this hub, so it needs no public address and no open port.</p></div>'+
+    (s.warning?'<div class="note warn"><b>Fix this first:</b> '+esc(s.warning)+'</div>':'')+
+    '<section class="card"><h2>The easy way</h2><p>On that computer, download relay (below), open it, choose <b>Share this computer</b> and paste this join code:</p>'+
+    '<div class="codebox"><pre>'+esc(code)+'</pre><button class="btn" data-act="copy" data-what="code">'+(A.copied==='code'?'Copied':'Copy')+'</button></div>'+
+    '<div class="row"><button class="btn small" data-act="toggleCode">'+(A.showCode?'Hide code':'Show code')+'</button><span class="muted">It holds this hub\'s address and the node token. Treat it like a password.</span></div></section>'+
+    '<section class="card"><h2>Or with one command</h2>'+
+    '<div class="row" role="group" aria-label="System">'+pick('os','windows','Windows')+pick('os','darwin','macOS')+pick('os','linux','Linux')+'<span style="width:1px;align-self:stretch;background:var(--line);margin:0 6px"></span>'+pick('arch','amd64','amd64')+pick('arch','arm64','arm64')+'</div>'+
+    '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"><div style="display:flex;flex-direction:column;gap:6px"><label class="label" for="aname">Name (optional)</label><input id="aname" class="field mono" placeholder="its hostname" value="'+esc(A.name)+'"></div>'+
+    '<div style="display:flex;flex-direction:column;gap:6px"><label class="label" for="aroot">Folder agents may use</label><input id="aroot" class="field mono" placeholder="'+esc(def)+'" value="'+esc(A.root)+'"></div></div>'+
+    '<div class="row" style="gap:6px 24px"><label class="check"><input type="checkbox" id="aexec"'+(A.exec?' checked':'')+'>Let agents run commands</label><label class="check"><input type="checkbox" id="ainst"'+(A.install?' checked':'')+'>Keep it running after reboots</label></div>'+
+    '<div class="row"><a class="btn" href="'+esc(dl)+'" target="_blank" rel="noopener">Download '+esc(file)+'</a><span class="muted">'+(A.os==='windows'?'Unzip it, then open PowerShell in that folder.':'Unpack it with tar -xzf, then cd into that folder.')+'</span></div>'+
+    '<div class="codebox"><pre id="acmd">'+esc(cmd)+'</pre><button class="btn" data-act="copy" data-what="cmd">'+(A.copied==='cmd'?'Copied':'Copy')+'</button></div>'+
+    (A.showCode?'':'<span class="muted">Copy puts the real code in place of &lt;join code&gt;.</span>')+'</section>'+
+    (fresh.length?'<div class="note ok" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center"><b style="flex:1">'+fresh.map(n=>esc(n.name)).join(', ')+(fresh.length===1?' is':' are')+' connected.</b><a class="btn go" href="#machines">See it in Machines</a></div>':
+      '<div class="card" style="flex-direction:row;align-items:center;gap:12px;padding:16px 18px"><span style="width:12px;height:12px;border-radius:50%;border:2px solid var(--amber)"></span><span>Waiting for a new machine to connect. This page updates by itself.</span></div>')+
+    '<details id="reachHelp"><summary>It says “cannot reach the server”</summary><ul style="margin:0 0 14px;padding-left:20px;display:flex;flex-direction:column;gap:8px;color:var(--soft)">'+
+    '<li><b>Connection refused:</b> the machine reached the address, but nothing listens on that port. Is the hub running, and does it listen on the port in <span class="mono">'+esc(s.url)+'</span>? (It listens on <span class="mono">'+esc(s.listen)+'</span>.)</li>'+
+    '<li><b>Timed out:</b> a firewall drops the connection. Open the port in the cloud provider\'s firewall or security group, and on the hub.</li>'+
+    '<li><b>Token rejected:</b> the code is from an older setup. Copy it again from this page.</li></ul></details>';
+}
+
+// ---------- approvals ----------
+function approvals(){
+  const ps=D.pending, d=mins();
+  const byAgent={}; ps.filter(p=>p.kind!=='grant').forEach(p=>(byAgent[p.agent]=byAgent[p.agent]||[]).push(p.id));
+  const durs=[15,30,60,240,480];
+  let out='<div class="head"><div style="display:flex;flex-direction:column;gap:6px"><h1>Approvals</h1><p class="sub" style="max-width:620px">Calls your policy marks “ask” wait here. Allow one, or allow everything like it for a while so the agent can keep working.</p></div>'+
+    '<div class="row"><label for="dur" class="muted" style="font-size:14px">Wider approvals last</label><select id="dur" class="field" style="width:auto">'+durs.map(m=>'<option value="'+m+'"'+(m===d?' selected':'')+'>'+human(m)+'</option>').join('')+'</select></div></div>';
+  out+='<section style="display:flex;flex-direction:column;gap:12px"><div class="row" style="justify-content:space-between"><h2>Waiting · '+ps.length+'</h2>'+
+    Object.entries(byAgent).filter(([a,ids])=>ids.length>1).map(([a,ids])=>'<button class="btn" data-act="allowAll" data-ids="'+esc(ids.join(','))+'">Allow all '+ids.length+' from '+esc(a)+' once</button>').join('')+'</div>';
+  if(!ps.length) out+='<div class="empty">Nothing is waiting. New calls your policy asks about show up here within two seconds.</div>';
+  out+=ps.map(p=>{
+    const head='<div class="row" style="gap:8px"><span class="pill '+(p.kind==='grant'?'info':'warn')+'">'+(p.kind==='grant'?'grant request':esc(p.tool))+'</span><span><b>'+esc(p.agent)+'</b> <span class="muted">on</span> <b class="mono">'+esc(p.node||'?')+'</b></span><span class="muted" style="margin-left:auto">waiting '+since(p.created)+' · expires '+clock(p.expires)+'</span></div>';
+    if(p.kind==='grant') return '<article class="card" style="border-color:var(--blue-line)">'+head+'<pre class="call mono">'+esc(p.grant_scope)+'</pre>'+(p.reason?'<p class="muted">“'+esc(p.reason)+'”</p>':'')+
+      '<div class="row"><button class="btn go" data-act="decide" data-id="'+esc(p.id)+'" data-d="allow" data-m="'+p.minutes+'">Grant for '+human(p.minutes)+'<small>as asked</small></button><button class="btn" data-act="decide" data-id="'+esc(p.id)+'" data-d="allow" data-m="'+d+'">Grant for '+human(d)+'</button><button class="btn no" data-act="decide" data-id="'+esc(p.id)+'" data-d="deny">Deny</button></div></article>';
+    return '<article class="card">'+head+'<pre class="call mono">'+esc((p.command?'$ '+p.command:'')+(p.command&&p.path?'\n':'')+(p.path||''))+'</pre>'+(p.reason?'<p class="muted">'+esc(p.reason)+'</p>':'')+
+      '<div class="row"><button class="btn go" data-act="decide" data-id="'+esc(p.id)+'" data-d="allow">Allow once</button>'+
+      (p.similar?'<button class="btn" data-act="decide" data-id="'+esc(p.id)+'" data-d="similar" data-m="'+d+'">Allow similar for '+human(d)+'<small>'+esc(p.similar)+'</small></button>':'')+
+      '<button class="btn" data-act="decide" data-id="'+esc(p.id)+'" data-d="node" data-m="'+d+'">Everything on '+esc(p.node||'the node')+' for '+human(d)+'</button>'+
+      '<button class="btn no" data-act="decide" data-id="'+esc(p.id)+'" data-d="deny">Deny</button></div></article>';
+  }).join('')+'</section>';
+  out+='<section style="display:flex;flex-direction:column;gap:12px"><h2>Active grants · '+D.grants.length+'</h2>'+
+    (D.grants.length?'<div class="tbl"><table style="min-width:600px"><thead><tr><th class="label">Grant</th><th class="label">Lets</th><th class="label">Agent</th><th class="label">Until</th><th class="label">Used</th><th><span class="sr">Revoke</span></th></tr></thead><tbody>'+
+      D.grants.map(g=>'<tr><td class="mono muted">'+esc(g.id)+'</td><td class="mono">'+esc(g.scope)+(g.reason?'<div class="muted" style="font-family:system-ui">'+esc(g.reason)+'</div>':'')+'</td><td>'+esc(g.agent)+'</td><td>'+clock(g.expires)+'</td><td>'+g.uses+'×</td><td style="text-align:right"><button class="btn small no" data-act="revoke" data-id="'+esc(g.id)+'">Revoke</button></td></tr>').join('')+'</tbody></table></div>':'<p class="muted">None. A wider approval or an agent\'s grant request shows up here until it ends.</p>')+
+    '<p class="muted">A grant never overrides a deny rule in the policy.</p></section>';
+  return out;
+}
+
+// ---------- connect an agent ----------
+function snippet(show){
+  const s=D.setup, url=(s.url||location.origin)+'/mcp';
+  const tok=s.agent_token?(show?s.agent_token:'••••••••••••'+s.agent_token.slice(-4)):'<your agent token>';
+  return {
+    claude:['Run this where you use Claude Code.','claude mcp add --transport http relay '+url+' \\\n  --header "Authorization: Bearer '+tok+'"'],
+    cursor:['Add this to ~/.cursor/mcp.json, then reload Cursor.','{\n  "mcpServers": {\n    "relay": {\n      "url": "'+url+'",\n      "headers": { "Authorization": "Bearer '+tok+'" }\n    }\n  }\n}'],
+    other:['Any MCP client that speaks streamable HTTP.','URL     '+url+'\nHeader  Authorization: Bearer '+tok]}[C.tab];
+}
+function agent(){
+  const s=D.setup, snip=snippet(C.show);
+  const tab=(k,l)=>'<button class="tab" role="tab" aria-selected="'+(C.tab===k)+'" data-act="tab" data-k="'+k+'">'+l+'</button>';
+  return '<div style="display:flex;flex-direction:column;gap:6px"><h1>Connect an agent</h1><p class="sub">Add this hub once as an MCP server. The agent then sees every machine, and the tools to use them.</p></div>'+
+    '<section class="card" style="padding:0;gap:0"><div class="tabs" role="tablist" aria-label="Agent">'+tab('claude','Claude Code')+tab('cursor','Cursor')+tab('other','Other MCP client')+'</div>'+
+    '<div style="padding:20px;display:flex;flex-direction:column;gap:12px"><span class="muted" style="font-size:14px">'+snip[0]+'</span>'+
+    '<div class="codebox"><pre>'+esc(snip[1])+'</pre><button class="btn" data-act="copy" data-what="snippet">'+(A.copied==='snippet'?'Copied':'Copy')+'</button></div>'+
+    (s.agent_token?'<div class="row"><button class="btn" data-act="toggleTok">'+(C.show?'Hide token':'Show token')+'</button><button class="btn" data-act="checkAgent">Check the connection</button><span aria-live="polite" style="font-size:14px;'+(C.check.startsWith('✓')?'color:var(--green)':C.check?'color:var(--red)':'')+'">'+esc(C.check)+'</span></div>':
+      '<div class="note warn">This hub has no shared agent token: agents are named in the policy file, each with its own token. Put that token where the snippet says.</div>')+'</div></section>'+
+    '<section class="card"><h2>Agents</h2><p class="muted" style="font-size:14px">Give each agent its own token so the policy can treat them differently and the activity log says who did what. Named agents live in the policy file'+(s.policy.file?' (<span class="mono">'+esc(s.policy.file)+'</span>)':'')+'; <code>relay hash</code> prints a token\'s fingerprint for it.</p>'+
+    '<div class="tbl"><table><tbody>'+(s.agent_token?'<tr><td class="mono"><b>default</b></td><td class="muted">the shared agent token from setup</td></tr>':'')+(s.named_agents||[]).map(a=>'<tr><td class="mono"><b>'+esc(a)+'</b></td><td class="muted">named in the policy</td></tr>').join('')+'</tbody></table></div></section>';
+}
+
+// ---------- activity ----------
+function describe(e){
+  const a=e.args||{}, t=e.ts;
+  const node=a.node||a.dst_node||'';
+  const what=a.command||(a.argv||[]).join(' ')||(a.src_node?a.src_node+':'+a.src_path+' → '+a.dst_node+':'+a.dst_path:'')||a.path||a.pattern||'';
+  switch(e.event){
+  case 'tool_call': return {t,kind:'call',k:'call',who:e.agent+' · '+e.tool+(node&&!a.src_node?' on '+node:''),what,result:e.ok?'done'+(e.policy?' · '+e.policy:''):(e.error||'failed'),cls:e.ok?'ok':'bad',bad:!e.ok};
+  case 'approval_requested': return {t,kind:'approval',k:'approval',who:'Waiting for you: '+e.agent,what:e.call,result:e.reason||'asked',cls:'warn'};
+  case 'approval_decided': return {t,kind:'approval',k:'approval',who:(e.allow?'Approved':'Denied')+' by '+String(e.by||'').replace(/@.*/,''),what:e.grants||e.reason||'',result:e.allow?(e.always?'always':'allowed'):'denied',cls:e.allow?'ok':'bad'};
+  case 'approval_timeout': return {t,kind:'approval',k:'approval',who:'Nobody answered in time',what:e.id,result:'refused',cls:'bad',bad:true};
+  case 'approval_abandoned': return {t,kind:'approval',k:'approval',who:'The agent stopped waiting',what:e.id,result:'dropped',cls:''};
+  case 'grant_created': return {t,kind:'grant',k:'approval',who:'Grant '+e.id+' for '+e.agent,what:e.scope,result:'created',cls:'ok'};
+  case 'grant_revoked': return {t,kind:'grant',k:'approval',who:'Grant '+e.id+' revoked',what:e.scope,result:'revoked',cls:''};
+  case 'node_connected': return {t,kind:'machine',k:'machine',who:e.node+' connected',what:'from '+String(e.remote||'').replace(/:\d+$/,''),result:'online',cls:'ok'};
+  case 'node_disconnected': return {t,kind:'machine',k:'machine',who:e.node+' disconnected',what:'',result:'offline',cls:''};
+  case 'policy_reloaded': return {t,kind:'policy',k:'policy',who:'Policy reloaded',what:e.rules+' rules, default '+e.default,result:'ok',cls:''};
+  case 'policy_reload_failed': return {t,kind:'policy',k:'policy',who:'Policy file has an error',what:e.error,result:'kept the old one',cls:'bad',bad:true};
+  case 'node_auth_failed': case 'agent_auth_failed': case 'admin_auth_failed':
+    return {t,kind:'auth',k:'machine',who:'Wrong '+e.event.split('_')[0]+' token from',what:String(e.remote||'').replace(/:\d+$/,''),result:'rejected',cls:'bad',bad:true};
+  }
+  return {t,kind:e.event||'?',k:'other',who:e.event||'',what:'',result:'',cls:''};
+}
+function rowHTML(r){return '<tr><td class="mono muted" style="white-space:nowrap">'+clock(r.t)+'</td><td><span class="pill">'+esc(r.kind)+'</span></td><td>'+esc(r.who)+(r.what?' <span class="mono" style="font-size:13px;color:var(--soft);word-break:break-word">'+esc(r.what)+'</span>':'')+'</td><td style="font-size:13px;color:var(--'+(r.cls==='ok'?'green':r.cls==='bad'?'red':r.cls==='warn'?'amber':'muted')+')">'+esc(r.result)+'</td></tr>'}
+function activity(){
+  const all=D.activity.map(describe);
+  const match=(r,k)=>k==='all'||(k==='bad'?r.bad:r.k===k);
+  const q=F.q.toLowerCase();
+  const rows=all.filter(r=>match(r,F.kind)&&(!q||(r.who+' '+r.what).toLowerCase().includes(q)));
+  const chip=(k,l)=>'<button class="btn" aria-pressed="'+(F.kind===k)+'" data-act="filter" data-k="'+k+'">'+l+' <span class="muted">'+all.filter(r=>match(r,k)).length+'</span></button>';
+  return '<div style="display:flex;flex-direction:column;gap:6px"><h1>Activity</h1><p class="sub">Every call, approval and connection, newest first, from the hub\'s audit log.</p></div>'+
+    '<div class="row"><div class="row" role="group" aria-label="Show" style="gap:6px">'+chip('all','All')+chip('call','Calls')+chip('approval','Approvals')+chip('machine','Machines')+chip('bad','Problems')+'</div>'+
+    '<label class="sr" for="q">Filter</label><input id="q" class="field" style="flex:1 1 240px;width:auto" placeholder="Filter by machine, agent, path or command" value="'+esc(F.q)+'"></div>'+
+    '<div class="tbl"><table style="min-width:760px"><thead><tr><th class="label" style="width:100px">Time</th><th class="label" style="width:100px">Kind</th><th class="label">What happened</th><th class="label" style="width:220px">Result</th></tr></thead><tbody id="rows">'+
+    (rows.length?rows.map(rowHTML).join(''):'<tr><td colspan="4" class="muted" style="text-align:center;padding:28px">'+(all.length?'Nothing matches.':'Nothing yet.')+'</td></tr>')+'</tbody></table></div>';
+}
+
+// ---------- events ----------
+async function copy(text,what,btn){
+  try{await navigator.clipboard.writeText(text); A.copied=what; btn.textContent='Copied'; setTimeout(()=>{A.copied=''},2000)}
+  catch(e){alert('The browser didn\'t allow copying. Select the text and copy it.')}
+}
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return;
+  const s=D.setup;
+  switch(b.dataset.act){
+  case 'signin': TOK=$('#tok').value.trim(); try{sessionStorage.setItem('relayAdmin',TOK)}catch(_){} await load(true); break;
+  case 'set': A[b.dataset.k]=b.dataset.v; break;
+  case 'toggleCode': A.showCode=!A.showCode; break;
+  case 'toggleTok': C.show=!C.show; break;
+  case 'tab': C.tab=b.dataset.k; break;
+  case 'filter': F.kind=b.dataset.k; break;
+  case 'copy': {
+    const w=b.dataset.what;
+    if(w==='code') return copy(s.join_code,w,b);
+    if(w==='cmd') return copy($('#acmd').textContent.replace('<join code>',s.join_code),w,b);
+    return copy(snippet(true)[1],w,b);
+  }
+  case 'checkAgent': {
+    C.check='Checking…'; render(true);
+    try{
+      const r=await fetch(new URL('/mcp',location.origin),{method:'POST',headers:{'Authorization':'Bearer '+s.agent_token,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});
+      const j=await r.json(); C.check=j.result?'✓ Works: '+j.result.tools.length+' tools, '+D.nodes.length+(D.nodes.length===1?' machine':' machines'):'✗ '+(j.error?j.error.message:r.status);
+    }catch(err){C.check='✗ '+err.message}
+    break;
+  }
+  case 'decide': {
+    const d=b.dataset.d, reason=d==='deny'?(prompt('Reason (optional, shown to the agent)')??''):'';
+    try{await post('decide',{id:b.dataset.id,decision:d,minutes:+(b.dataset.m||0),reason,by:'console'})}catch(err){alert(err.message)}
+    await load(); break;
+  }
+  case 'allowAll': await Promise.all(b.dataset.ids.split(',').map(id=>post('decide',{id,decision:'allow',by:'console'}).catch(()=>{}))); await load(); break;
+  case 'revoke': try{await post('grants/revoke',{id:b.dataset.id,by:'console'})}catch(err){alert(err.message)} await load(); break;
+  default: return;
+  }
+  render(true);
+});
+document.addEventListener('input',e=>{
+  const id=e.target.id;
+  if(id==='aname'||id==='aroot'){A[id==='aname'?'name':'root']=e.target.value.trim(); const tmp=document.createElement('div'); tmp.innerHTML=add(); $('#acmd').textContent=tmp.querySelector('#acmd').textContent}
+  if(id==='q'){F.q=e.target.value; const tmp=document.createElement('div'); tmp.innerHTML=activity(); $('#rows').innerHTML=tmp.querySelector('#rows').innerHTML}
+});
+document.addEventListener('change',e=>{
+  const id=e.target.id;
+  if(id==='dur'){store.set('relayDur',e.target.value); render(true)}
+  if(id==='aexec'||id==='ainst'){A[id==='aexec'?'exec':'install']=e.target.checked; render(true)}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='tok') document.querySelector('[data-act=signin]').click()});
+window.addEventListener('hashchange',async()=>{if(route()==='add') A.known=null; C.check=''; await load(); render(true); $('#main').focus?.()});
+
+(async()=>{
+  await load(true); render(true);
+  setInterval(async()=>{const before=JSON.stringify(D); await load(); if(JSON.stringify(D)!==before) render()},2000);
+})();
+</script>
+</body>
+</html>
