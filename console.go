@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -209,4 +212,173 @@ func (s *server) setBlocked(w http.ResponseWriter, r *http.Request, on bool) {
 	}
 	s.audit.write(map[string]any{"event": event, "node": req.Name, "by": by})
 	w.Write([]byte("ok\n"))
+}
+
+// ---- named agents -------------------------------------------------------------------
+
+// handleAgentCreate makes a token for a new named agent, adds its sha256 to the
+// policy file and returns the token. The hub never stores the token itself, so
+// this response is the only time anyone sees it.
+func (s *server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name, By string }
+	if !s.agentRequest(w, r, &req) {
+		return
+	}
+	tok := newToken()
+	sum := sha256.Sum256([]byte(tok))
+	err := s.editAgents(func(list []agentConf) ([]agentConf, error) {
+		if req.Name == "default" || slices.ContainsFunc(list, func(a agentConf) bool { return a.Name == req.Name }) {
+			return nil, fmt.Errorf("there is already an agent called %q", req.Name)
+		}
+		return append(list, agentConf{Name: req.Name, TokenSHA256: hex.EncodeToString(sum[:]),
+			Comment: "added in the console on " + time.Now().Format("2006-01-02")}), nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.audit.write(map[string]any{"event": "agent_created", "agent": req.Name, "by": firstNonEmpty(req.By, "admin") + "@" + r.RemoteAddr})
+	writeJSON(w, map[string]string{"name": req.Name, "token": tok})
+}
+
+func (s *server) handleAgentRemove(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name, By string }
+	if !s.agentRequest(w, r, &req) {
+		return
+	}
+	err := s.editAgents(func(list []agentConf) ([]agentConf, error) {
+		i := slices.IndexFunc(list, func(a agentConf) bool { return a.Name == req.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("no agent called %q in the policy", req.Name)
+		}
+		return slices.Delete(list, i, i+1), nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.audit.write(map[string]any{"event": "agent_removed", "agent": req.Name, "by": firstNonEmpty(req.By, "admin") + "@" + r.RemoteAddr})
+	w.Write([]byte("ok\n"))
+}
+
+func (s *server) agentRequest(w http.ResponseWriter, r *http.Request, req *struct{ Name, By string }) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if !s.adminAuth(w, r) {
+		return false
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(req); err != nil || !validName.MatchString(req.Name) {
+		http.Error(w, "give the agent a name: letters, digits, - _ . (up to 64)", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// editAgents changes the "agents" list of the policy file and leaves every
+// other part of it as written, byte for byte. The result must parse as a
+// policy before it is saved, and it takes effect at once.
+func (s *server) editAgents(edit func([]agentConf) ([]agentConf, error)) error {
+	if s.policyPath == "" {
+		return errors.New("this hub runs without a policy file, so it has no named agents (start it with --policy)")
+	}
+	s.agentsMu.Lock()
+	defer s.agentsMu.Unlock()
+	data, err := os.ReadFile(s.policyPath)
+	if err != nil {
+		return err
+	}
+	keys, vals, err := topLevel(data)
+	if err != nil {
+		return fmt.Errorf("%s: %v", s.policyPath, err)
+	}
+	var list []agentConf
+	if raw, ok := vals["agents"]; ok {
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return fmt.Errorf("%s: agents: %v", s.policyPath, err)
+		}
+	}
+	if list, err = edit(list); err != nil {
+		return err
+	}
+	if _, ok := vals["agents"]; !ok && len(list) > 0 {
+		at := slices.Index(keys, "rules") // agents read best above the rules
+		if at < 0 {
+			at = len(keys)
+		}
+		keys = slices.Insert(keys, at, "agents")
+	}
+	var b bytes.Buffer
+	b.WriteString("{\n")
+	first := true
+	for _, k := range keys {
+		raw := vals[k]
+		if k == "agents" {
+			if len(list) == 0 {
+				continue
+			}
+			raw = agentsJSON(list)
+		}
+		if !first {
+			b.WriteString(",\n")
+		}
+		first = false
+		kb, _ := json.Marshal(k)
+		fmt.Fprintf(&b, "  %s: %s", kb, raw)
+	}
+	b.WriteString("\n}\n")
+	p, err := parsePolicy(b.Bytes())
+	if err != nil {
+		return fmt.Errorf("the edited policy wouldn't load, so it wasn't saved: %v", err)
+	}
+	if err := writePrivate(s.policyPath, b.Bytes()); err != nil {
+		return err
+	}
+	s.pol.Store(p)
+	return nil
+}
+
+// agentsJSON writes one agent per line, like the rest of a hand-edited policy.
+func agentsJSON(list []agentConf) json.RawMessage {
+	var b bytes.Buffer
+	b.WriteString("[\n")
+	for i, a := range list {
+		line, _ := json.Marshal(a)
+		b.WriteString("    ")
+		b.Write(line)
+		if i < len(list)-1 {
+			b.WriteString(",")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("  ]")
+	return b.Bytes()
+}
+
+// topLevel splits a JSON object into its keys, in order, and their values as
+// written.
+func topLevel(data []byte) ([]string, map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, nil, errors.New("not a JSON object")
+	}
+	var keys []string
+	vals := map[string]json.RawMessage{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return nil, nil, err
+		}
+		k, _ := t.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, nil, err
+		}
+		if _, dup := vals[k]; !dup {
+			keys = append(keys, k)
+		}
+		vals[k] = raw
+	}
+	return keys, vals, nil
 }

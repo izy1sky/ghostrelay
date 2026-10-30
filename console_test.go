@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -113,5 +114,59 @@ func TestDisconnectMachine(t *testing.T) {
 		t.Errorf("allowed again: %v", err)
 	} else {
 		c.CloseNow()
+	}
+}
+
+// The console adds and removes named agents by editing only the "agents"
+// list of the policy file; the token works at once and the hub never keeps it.
+func TestAgentTokens(t *testing.T) {
+	s := testServer(t, policyPresets["workspace"])
+	s.policyPath = filepath.Join(t.TempDir(), "policy.json")
+	os.WriteFile(s.policyPath, []byte(policyPresets["workspace"]), 0o600)
+	keep := func(b []byte) string { // the rules, exactly as written
+		i := bytes.Index(b, []byte(`"rules"`))
+		return string(b[i:])
+	}
+	before, _ := os.ReadFile(s.policyPath)
+
+	post := func(h http.HandlerFunc, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer admin")
+		w := httptest.NewRecorder()
+		h(w, r)
+		return w
+	}
+	w := post(s.handleAgentCreate, `{"name":"laptop"}`)
+	var res struct{ Name, Token string }
+	if json.Unmarshal(w.Body.Bytes(), &res) != nil || res.Token == "" {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	after, _ := os.ReadFile(s.policyPath)
+	if keep(after) != keep(before) {
+		t.Errorf("the rest of the file changed:\n%s", after)
+	}
+	if bytes.Contains(after, []byte(res.Token)) {
+		t.Error("the token itself must not be stored")
+	}
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Authorization", "Bearer "+res.Token)
+	if name, ok := s.identifyAgent(r); !ok || name != "laptop" {
+		t.Errorf("new token right away: %q %v", name, ok)
+	}
+
+	for _, body := range []string{`{"name":"laptop"}`, `{"name":"default"}`, `{"name":"no spaces"}`} {
+		if w := post(s.handleAgentCreate, body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", body, w.Code)
+		}
+	}
+
+	if w := post(s.handleAgentRemove, `{"name":"laptop"}`); w.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", w.Code, w.Body)
+	}
+	if _, ok := s.identifyAgent(r); ok {
+		t.Error("removed agent's token still works")
+	}
+	if final, _ := os.ReadFile(s.policyPath); bytes.Contains(final, []byte(`"agents"`)) || keep(final) != keep(before) {
+		t.Errorf("after remove:\n%s", final)
 	}
 }

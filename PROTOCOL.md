@@ -202,6 +202,8 @@ Admin endpoints, all with `Authorization: Bearer <ADMIN_TOKEN>`:
 | `POST /admin/api/grants/revoke` | `{"id", "by"?}` → `ok`, or 404 |
 | `GET /admin/api/nodes`     | `{connected: [node_info + remote, connected_at], disconnected: [{name, by, at}]}` |
 | `POST /admin/api/nodes/disconnect` | `{"name", "by"?}` → `ok`. Closes that node's link with WebSocket code **4003** and refuses it (4003 again, at the hello) until allowed. The list lives in `blocked.json` beside the policy |
+| `POST /admin/api/agents/create` | `{"name", "by"?}` → `{name, token}`. Adds `{name, token_sha256, comment}` to the policy file's `agents` (the rest of the file stays as written) and loads it at once. The token is in this response only |
+| `POST /admin/api/agents/remove` | `{"name", "by"?}` → `ok`; that agent's token stops working at once |
 | `POST /admin/api/nodes/allow` | `{"name", "by"?}` → `ok`. The node gets back in at its next try (nodes refused with 4003 retry every minute) |
 | `GET /admin/api/setup`     | `{version, url, listen, tls, join_code?, agent_token, named_agents, policy: {file, default, rules}, warning?}`: what the console needs to add machines and agents. `warning` is set when the port in `url` differs from `listen` |
 | `GET /admin/api/activity?limit=N` | the newest audit records first (default 300, max 1000) |
