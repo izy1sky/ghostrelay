@@ -60,6 +60,29 @@ func TestJoinCode(t *testing.T) {
 	}
 }
 
+func TestPortMismatch(t *testing.T) {
+	for _, c := range []struct {
+		listen, url string
+		warn        bool
+	}{
+		{":8787", "http://1.2.3.4:8787", false},
+		{":8787", "http://1.2.3.4:4747", true}, // url changed, listen forgotten
+		{"0.0.0.0:443", "https://relay.example.com", false},
+		{":8787", "https://relay.example.com", true}, // behind a proxy: warned, not refused
+		{":8787", "http://[::1]:8787/", false},
+		{"bad", "http://1.2.3.4:4747", false},
+		{":8787", "", false},
+	} {
+		w := portMismatch(c.listen, c.url)
+		if (w != "") != c.warn {
+			t.Errorf("portMismatch(%q, %q) = %q, want warning %v", c.listen, c.url, w, c.warn)
+		}
+	}
+	if w := portMismatch(":8787", "http://1.2.3.4:4747"); !strings.Contains(w, "--listen :4747") {
+		t.Errorf("warning should name the fix: %q", w)
+	}
+}
+
 func TestPolicyPresetsParse(t *testing.T) {
 	for name, p := range policyPresets {
 		if _, err := parsePolicy([]byte(p)); err != nil {
