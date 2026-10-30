@@ -2,6 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -16,12 +20,14 @@ import (
 //	node.activity.jsonl  what agents did on this machine (rotated at 1 MiB)
 //	node.paused          while it exists, the node stays disconnected
 //
+// If the settings file itself disappears (relay leave), the node stops.
+//
 // A node started with flags only (no settings file) keeps none of them.
 
 func sidecar(cfg, suffix string) string { return strings.TrimSuffix(cfg, ".json") + suffix }
 
 type nodeStatus struct {
-	State   string    `json:"state"` // connecting | connected | paused
+	State   string    `json:"state"` // connecting | connected | paused | disconnected (by the hub)
 	Since   time.Time `json:"since"`
 	Server  string    `json:"server"`
 	Error   string    `json:"error,omitempty"`
@@ -69,6 +75,15 @@ func (l *nodeLocal) paused() bool {
 	return err == nil
 }
 
+// gone reports whether the settings file was removed, by relay leave.
+func (l *nodeLocal) gone() bool {
+	if l == nil || l.cfg == "" {
+		return false
+	}
+	_, err := os.Stat(l.cfg)
+	return errors.Is(err, os.ErrNotExist)
+}
+
 func (l *nodeLocal) state() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -89,7 +104,7 @@ func (l *nodeLocal) set(state, errText string) {
 }
 
 func (l *nodeLocal) writeLocked() {
-	if l.cfg == "" {
+	if l.cfg == "" || l.gone() {
 		return
 	}
 	l.st.Updated = time.Now()
@@ -143,5 +158,66 @@ func (l *nodeLocal) record(op string, raw json.RawMessage, err error) {
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
 		f.Write(append(b, '\n'))
 		f.Close()
+	}
+}
+
+// ---- relay pause / resume / leave ---------------------------------------------------
+
+// setPaused creates or removes the pause file; a running node notices within 2 s.
+func setPaused(cfg string, paused bool) error {
+	p := sidecar(cfg, ".paused")
+	if !paused {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if _, err := os.Stat(cfg); err != nil {
+		return fmt.Errorf("this computer isn't shared (no %s)", cfg)
+	}
+	return writePrivate(p, []byte("Paused with relay pause or the relay page. Delete this file, or run relay resume, to resume.\n"))
+}
+
+// leaveNode stops sharing this computer for good: it removes the background
+// service, if any, and the settings, so a node still running in a terminal
+// stops by itself within 2 s.
+func leaveNode(cfg string) error {
+	if s, err := newService("node", cfg); err == nil && s.installed() {
+		if err := s.uninstall(); err != nil {
+			return err
+		}
+	}
+	for _, suffix := range []string{".json", ".status.json", ".paused", ".activity.jsonl", ".activity.jsonl.1"} {
+		if err := os.Remove(sidecar(cfg, suffix)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func runNodeSwitch(cmd string, args []string) {
+	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	cfg := fs.String("config", defaultNodeConfig(), "this node's settings, written by relay join")
+	fs.Parse(args)
+	var err error
+	switch cmd {
+	case "pause":
+		if err = setPaused(*cfg, true); err == nil {
+			fmt.Println("paused: agents can't reach this computer until relay resume (a running node disconnects within 2 s)")
+		}
+	case "resume":
+		if err = setPaused(*cfg, false); err == nil {
+			fmt.Println("resumed: the node reconnects within a few seconds, if it's running (relay service status)")
+		}
+	case "leave":
+		if _, statErr := os.Stat(*cfg); statErr != nil {
+			log.Fatalf("this computer isn't shared (no %s)", *cfg)
+		}
+		if err = leaveNode(*cfg); err == nil {
+			fmt.Println("left the hub: the background service (if any) is removed and the settings deleted. To share again: relay join <code>, or relay")
+		}
+	}
+	if err != nil {
+		log.Fatal(err)
 	}
 }

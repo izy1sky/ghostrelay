@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"flag"
@@ -57,13 +59,24 @@ func newService(role, cfg string) (*service, error) {
 	if name, _ := m["name"].(string); role == "node" && name != "" {
 		id += "-" + name
 	}
+	if h := os.Getenv("RELAY_HOME"); h != "" {
+		// Another settings folder is another set of services, even when a
+		// node there has the same name as one in ~/.relay.
+		abs, _ := filepath.Abs(h)
+		sum := sha256.Sum256([]byte(abs))
+		id += "-" + hex.EncodeToString(sum[:3])
+	}
+	return &service{role: role, cfg: cfg, id: id, exe: serviceExe(),
+		logPath: filepath.Join(relayHome(), "logs", id+".log")}, nil
+}
+
+// serviceExe is the copy of relay that services run: ~/.relay/bin/relay.
+func serviceExe() string {
 	exe := "relay"
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	home := relayHome()
-	return &service{role: role, cfg: cfg, id: id, exe: filepath.Join(home, "bin", exe),
-		logPath: filepath.Join(home, "logs", id+".log")}, nil
+	return filepath.Join(relayHome(), "bin", exe)
 }
 
 func (s *service) args() []string {
@@ -187,6 +200,19 @@ func (s *service) stop() {
 	case "windows":
 		powershell(fmt.Sprintf("Stop-ScheduledTask -TaskName %s -ErrorAction SilentlyContinue", psQuote(s.id)))
 	}
+}
+
+// start (re)registers the service and starts it, with its current files.
+func (s *service) start() error {
+	switch runtime.GOOS {
+	case "darwin":
+		return s.installLaunchd()
+	case "linux":
+		return s.installSystemd()
+	case "windows":
+		return s.installTask()
+	}
+	return fmt.Errorf("relay service doesn't support %s", runtime.GOOS)
 }
 
 func (s *service) uninstall() error {

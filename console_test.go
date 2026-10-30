@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 func TestConsoleAPIs(t *testing.T) {
@@ -48,8 +53,65 @@ func TestConsoleAPIs(t *testing.T) {
 		t.Errorf("activity, newest first and skipping bad lines: %v", acts)
 	}
 
-	var nodes []any
-	if w := get(s.handleNodes, "/admin/api/nodes", "admin"); json.Unmarshal(w.Body.Bytes(), &nodes) != nil || len(nodes) != 0 {
+	var nodes struct{ Connected, Disconnected []any }
+	if w := get(s.handleNodes, "/admin/api/nodes", "admin"); json.Unmarshal(w.Body.Bytes(), &nodes) != nil || len(nodes.Connected) != 0 || nodes.Disconnected == nil {
 		t.Errorf("nodes: %s", w.Body)
+	}
+}
+
+// Disconnecting a machine in the console drops its link with code 4003 and
+// keeps it out until the console allows it again, also across restarts.
+func TestDisconnectMachine(t *testing.T) {
+	s := testServer(t, policyPresets["workspace"])
+	s.nodeToken, s.nodes = "nodetok", map[string]*nodeConn{}
+	file := filepath.Join(t.TempDir(), "blocked.json")
+	s.blocked, _ = newBlockStore(file)
+	srv := httptest.NewServer(http.HandlerFunc(s.handleNode))
+	defer srv.Close()
+
+	dial := func() (*websocket.Conn, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{
+			HTTPHeader: http.Header{"Authorization": {"Bearer nodetok"}}})
+		if err != nil {
+			return nil, err
+		}
+		wsjson.Write(ctx, c, &Msg{Type: msgHello, Info: &NodeInfo{Name: "box"}})
+		var m Msg
+		return c, wsjson.Read(ctx, c, &m)
+	}
+	post := func(h http.HandlerFunc, body string) int {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer admin")
+		w := httptest.NewRecorder()
+		h(w, r)
+		return w.Code
+	}
+
+	c, err := dial()
+	if err != nil {
+		t.Fatalf("first connect: %v", err)
+	}
+	if code := post(s.handleDisconnect, `{"name":"box","by":"test"}`); code != http.StatusOK {
+		t.Fatalf("disconnect: %d", code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err = c.Read(ctx)
+	if websocket.CloseStatus(err) != closeDisconnected {
+		t.Errorf("connected node should be closed with 4003: %v", err)
+	}
+	if _, err := dial(); websocket.CloseStatus(err) != closeDisconnected {
+		t.Errorf("reconnecting must be refused with 4003: %v", err)
+	}
+	if again, _ := newBlockStore(file); !again.has("box") {
+		t.Error("the list must survive a restart")
+	}
+	post(s.handleAllow, `{"name":"box"}`)
+	if c, err := dial(); err != nil {
+		t.Errorf("allowed again: %v", err)
+	} else {
+		c.CloseNow()
 	}
 }

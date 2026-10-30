@@ -39,7 +39,8 @@ type server struct {
 	pending map[string]*pendingCall
 	always  map[string]bool
 
-	grants *grantStore
+	grants  *grantStore
+	blocked *blockStore // machines the console disconnected
 
 	// for the console: what to put in join codes and agent setup, and the log it shows
 	pubURL, listen, auditPath string
@@ -108,6 +109,13 @@ func runServe(args []string) {
 	if n := len(s.grants.active()); n > 0 {
 		log.Printf("%d active grants from %s (relay grants)", n, grantsFile)
 	}
+	blockedFile := ""
+	if s.policyPath != "" {
+		blockedFile = filepath.Join(filepath.Dir(s.policyPath), "blocked.json")
+	}
+	if s.blocked, err = newBlockStore(blockedFile); err != nil {
+		log.Fatalf("blocked machines: %v", err)
+	}
 	a, err := openAudit(*auditPath)
 	if err != nil {
 		log.Fatalf("audit log: %v", err)
@@ -129,6 +137,8 @@ func runServe(args []string) {
 	mux.HandleFunc("/admin/api/grants", s.handleGrants)
 	mux.HandleFunc("/admin/api/grants/revoke", s.handleRevoke)
 	mux.HandleFunc("/admin/api/nodes", s.handleNodes)
+	mux.HandleFunc("/admin/api/nodes/disconnect", s.handleDisconnect)
+	mux.HandleFunc("/admin/api/nodes/allow", s.handleAllow)
 	mux.HandleFunc("/admin/api/setup", s.handleSetup)
 	mux.HandleFunc("/admin/api/activity", s.handleActivity)
 	mux.HandleFunc("/node", s.handleNode)
@@ -193,6 +203,11 @@ func (s *server) handleNode(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	if err != nil || hello.Type != msgHello || hello.Info == nil || !validName.MatchString(hello.Info.Name) {
 		c.Close(websocket.StatusPolicyViolation, "bad hello")
+		return
+	}
+	if s.blocked.has(hello.Info.Name) {
+		s.audit.write(map[string]any{"event": "node_refused", "node": hello.Info.Name, "remote": r.RemoteAddr})
+		c.Close(closeDisconnected, "disconnected by the hub's owner; it can reconnect once the console allows it again")
 		return
 	}
 
@@ -264,10 +279,12 @@ func (s *server) nodeList() []*nodeConn {
 	return out
 }
 
-func (nc *nodeConn) close(reason string) {
+func (nc *nodeConn) close(reason string) { nc.closeWith(websocket.StatusGoingAway, reason) }
+
+func (nc *nodeConn) closeWith(code websocket.StatusCode, reason string) {
 	nc.closeOnce.Do(func() {
 		close(nc.done)
-		nc.conn.Close(websocket.StatusGoingAway, reason)
+		nc.conn.Close(code, reason)
 	})
 }
 

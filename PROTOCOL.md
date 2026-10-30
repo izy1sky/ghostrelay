@@ -200,7 +200,9 @@ Admin endpoints, all with `Authorization: Bearer <ADMIN_TOKEN>`:
 | `POST /admin/api/decide`   | `{"id", "decision": "allow" \| "always" \| "similar" \| "node" \| "deny", "minutes"?, "reason"?, "by"?}` → `ok`, or 404 if already gone. `similar` / `node` also store the offered grants for `minutes` (default 60); `allow` on a `grant` entry stores the requested grant |
 | `GET /admin/api/grants`    | active grants: `[{id, agent, node, tools?, paths?, programs?, reason?, by, created, expires, uses, scope}]` |
 | `POST /admin/api/grants/revoke` | `{"id", "by"?}` → `ok`, or 404 |
-| `GET /admin/api/nodes`     | connected nodes: their `node_info` plus `remote` and `connected_at` |
+| `GET /admin/api/nodes`     | `{connected: [node_info + remote, connected_at], disconnected: [{name, by, at}]}` |
+| `POST /admin/api/nodes/disconnect` | `{"name", "by"?}` → `ok`. Closes that node's link with WebSocket code **4003** and refuses it (4003 again, at the hello) until allowed. The list lives in `blocked.json` beside the policy |
+| `POST /admin/api/nodes/allow` | `{"name", "by"?}` → `ok`. The node gets back in at its next try (nodes refused with 4003 retry every minute) |
 | `GET /admin/api/setup`     | `{version, url, listen, tls, join_code?, agent_token, named_agents, policy: {file, default, rules}, warning?}`: what the console needs to add machines and agents. `warning` is set when the port in `url` differs from `listen` |
 | `GET /admin/api/activity?limit=N` | the newest audit records first (default 300, max 1000) |
 
@@ -221,7 +223,20 @@ A node with a settings file keeps three files beside it, which the page reads:
 `node.status.json` (state, since, last error; rewritten every 5 s, so older
 than 15 s means not running), `node.activity.jsonl` (each call it ran, minus
 polling and transfer plumbing; rotated at 1 MiB) and `node.paused` (while it
-exists, the node stays disconnected).
+exists, the node stays disconnected). If the settings file disappears
+(`relay leave`), the node stops. Its state is `connecting`, `connected`,
+`paused` or `disconnected` (refused by the hub with 4003).
+
+`relay update` reads the newest release from
+`https://api.github.com/repos/izy1sky/ghostrelay/releases/latest`, downloads
+`relay_<version>_<os>_<arch>.tar.gz|.zip` and `SHA256SUMS`, refuses a
+mismatch, and replaces `~/.relay/bin/relay` (with installed services stopped,
+then started) and the copy that ran it. The setup page asks the same API once
+when it starts, to offer **Update**.
+
+With `RELAY_HOME` set, service names get a suffix from a hash of that folder
+(`ghostrelay-node-box-1a2b3c`), so a second settings folder never drives the
+services of `~/.relay`.
 | `GET /admin/`              | the approval page; it needs no token to load, but asks for one before showing data |
 
 ## 5. Audit

@@ -234,14 +234,22 @@ function hubHost(){
 }
 
 // ----- home: this computer -----
+function updateNote(){
+  const u=S.update||{};
+  if(u.busy) return '<div class="note ok row"><span class="spin"></span>Updating relay…</div>';
+  if(u.newer) return '<div class="note ok row" style="justify-content:space-between"><span><b>relay '+esc(u.latest)+' is out.</b> This copy is '+esc(S.version)+(u.services?', the background copy '+esc(u.services):'')+'.</span><button class="btn go small" data-act="update" data-from="github">Update</button></div>';
+  if(u.services_older) return '<div class="note warn row" style="justify-content:space-between"><span><b>The background copy runs relay '+esc(u.services)+'</b>, older than this one ('+esc(S.version)+').</span><button class="btn small" data-act="update" data-from="here">Update it to '+esc(S.version)+'</button></div>';
+  return '';
+}
 function home(){
   const n=S.node, h=S.hub;
-  let out=topbar('<span class="muted">This computer · <span class="mono">'+esc(S.hostname)+'</span></span>')+flashNote();
+  let out=topbar('<span class="muted">This computer · <span class="mono">'+esc(S.hostname)+'</span></span>')+flashNote()+updateNote();
   if(n.configured){
     const st=n.status||{};
     const svcOn=n.service&&n.service!=='not installed';
     let cls='off',title='Not sharing right now',text='relay isn\'t running for this computer.',btn='<button class="btn go" data-act="nodeStart">Start sharing</button>';
     if(n.paused){cls='wait';title='Sharing is paused';text='Agents can\'t reach this computer until you resume. Programs already running keep going.';btn='<button class="btn go" data-act="resume">Resume sharing</button>'}
+    else if(n.running&&st.state==='disconnected'){cls='wait';title='The hub disconnected this computer';text='Whoever runs the hub turned it off in the console. It asks again every minute and reconnects once they allow it. To stop asking, pause or leave below.';btn='<button class="btn" data-act="pause">Pause sharing</button>'}
     else if(n.running&&st.state==='connected'){cls='on';title='Sharing is on';text='Connected to the hub for '+since(st.since)+'. Agents can use the folders below.';btn='<button class="btn" data-act="pause">Pause sharing</button>'}
     else if(n.running||n.here){cls='wait';title='Trying to reach the hub…';text=st.error?'Last try: '+st.error.split('\n')[0]:'Starting up.';btn='<button class="btn" data-act="pause">Pause sharing</button>'}
     out+='<section class="hero '+cls+'"><span class="bigdot"></span><div style="flex:1 1 300px;display:flex;flex-direction:column;gap:6px;min-width:0"><h1 style="font-size:27px">'+title+'</h1><span style="color:var(--soft);word-break:break-word">'+esc(text)+'</span></div>'+btn+'</section>'+
@@ -249,7 +257,7 @@ function home(){
       '<div class="grid2"><section class="card"><h2>What agents can use</h2><div style="display:flex;flex-direction:column;gap:6px"><span class="label">Folders</span>'+(n.roots||[]).map(r=>'<span class="mono" style="word-break:break-all">'+esc(r)+'</span>').join('')+'</div>'+
       '<div style="display:flex;flex-direction:column;gap:4px"><span class="label">Programs</span><span>'+(n.allow_exec?'Allowed. Agents can run commands in these folders.':'Not allowed. Files only.')+'</span></div><p class="muted">Risky steps still wait for approval on the hub. To change folders, leave the hub below and share again.</p></section>'+
       '<section class="card"><h2>Hub</h2><div style="display:flex;flex-direction:column;gap:4px"><span class="label">Address</span><span class="mono" style="word-break:break-all">'+esc(n.server)+'</span></div><div style="display:flex;flex-direction:column;gap:4px"><span class="label">Name here</span><span class="mono">'+esc(n.name)+'</span></div>'+
-      '<label class="check"><input type="checkbox" id="nodeAuto"'+(svcOn?' checked':'')+'>Keep sharing when this window is closed, and after restarts</label><span class="muted" style="margin-top:-8px">'+(svcOn?'Runs in the background ('+esc(n.service)+').':'Shares only while this window is open.')+'</span></section></div>'+
+      '<label class="check"><input type="checkbox" id="nodeAuto"'+(svcOn?' checked':'')+'>Keep sharing when this window is closed, and after restarts</label><span class="muted" style="margin-top:-8px">'+(svcOn?'Runs in the background ('+esc(n.service)+'). Untick to stop the background copy; from a terminal, <code>relay pause</code> or <code>relay leave</code>.':'Shares only while this window is open.')+'</span></section></div>'+
       '<section class="card"><div class="row" style="justify-content:space-between"><h2>What agents did here</h2><span class="muted">newest first</span></div>'+
       (activity.length?'<ul class="list">'+activity.map(e=>'<li><span class="t mono">'+clock(e.t)+'</span><span class="w">'+esc(opName(e.op))+' <span class="mono" style="font-size:14px;color:var(--soft)">'+esc(e.what)+'</span></span>'+(e.ok?'':'<span style="color:var(--red);font-size:14px">failed: '+esc(e.error)+'</span>')+'</li>').join('')+'</ul>':'<p class="muted">Nothing yet. Calls from agents show up here.</p>')+'</section>'+
       '<details id="leaveBox"><summary>Stop sharing for good</summary><div class="row" style="padding:4px 0 18px"><span style="flex:1 1 300px;color:var(--soft)">This computer leaves the hub and forgets its join code. Your files stay where they are. To share again you need a code.</span><button class="btn no" data-act="leave">Leave the hub</button></div></details>';
@@ -351,6 +359,10 @@ document.addEventListener('click',async e=>{
   case 'pause': case 'resume':
     try{await api('/api/node/pause',{paused:act==='pause'})}catch(err){flash=err.message} await refresh(); break;
   case 'nodeStart': try{await api('/api/node/start',{})}catch(err){flash=err.message} await refresh(); break;
+  case 'update':
+    S.update.busy=true; render();
+    try{const r=await api('/api/update',{from:b.dataset.from}); alert('Updated:\n'+(r.done||[]).join('\n')+'\n\nClose this window and open relay again to use the new version of this page.')}catch(err){flash=err.message}
+    await refresh(); break;
   case 'hubStart': try{await api('/api/hub/start',{})}catch(err){flash=err.message} await new Promise(r=>setTimeout(r,800)); await refresh(); break;
   case 'copyCode':
     try{await navigator.clipboard.writeText(S.hub.join_code); b.textContent='Copied'; return}catch(err){J=J||{}; J.showCode=true; flash='The browser didn\'t allow copying. The full code is shown now: select and copy it.'}

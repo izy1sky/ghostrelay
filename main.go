@@ -39,6 +39,10 @@ func main() {
 		runJoin(os.Args[2:])
 	case "service":
 		runService(os.Args[2:])
+	case "pause", "resume", "leave":
+		runNodeSwitch(os.Args[1], os.Args[2:])
+	case "update":
+		runUpdate(os.Args[2:])
 	case "token":
 		fmt.Println(newToken())
 	case "hash":
@@ -72,6 +76,9 @@ func usage() {
   relay init            set up a server here: tokens, policy, join code
   relay invite          print the join code and agent setup again
   relay join <code>     set up this machine as a node  [--root DIR] [--allow-exec] [--install]
+  relay pause / resume  stop or restart sharing this computer, without forgetting the hub
+  relay leave           stop sharing for good: removes the background service and the settings
+  relay update          get the newest relay from GitHub, for this copy and the background services
   relay service ...     install | uninstall | status | logs   [node|server]
   relay serve [flags]   run the server   (relay serve -h; no flags: settings from relay init)
   relay node  [flags]   run a node       (relay node -h;  no flags: settings from relay join)

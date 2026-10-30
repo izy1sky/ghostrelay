@@ -47,6 +47,8 @@ type app struct {
 	mu       sync.Mutex
 	children map[string]*child // "node", "server"
 	svcCache map[string]svcEntry
+	latest   string // newest release on GitHub, asked once when the page starts
+	updating bool
 }
 
 type child struct {
@@ -89,6 +91,15 @@ func runApp(args []string) {
 		<-sig
 		a.stopChildren()
 		os.Exit(0)
+	}()
+	go func() { // so the page can offer an update; one request to api.github.com
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if v, err := latestRelease(ctx); err == nil {
+			a.mu.Lock()
+			a.latest = v
+			a.mu.Unlock()
+		}
 	}()
 	srv := &http.Server{Handler: a.routes(port), ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.Serve(ln))
@@ -137,6 +148,7 @@ func (a *app) routes(port int) http.Handler {
 		"POST /api/hub/public":     a.hubPublic,
 		"POST /api/hub/setup":      a.hubSetup,
 		"POST /api/hub/start":      func(*http.Request) (any, error) { return ok(), a.startHub() },
+		"POST /api/update":         a.update,
 	}
 	for route, h := range api {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
@@ -210,8 +222,73 @@ func (a *app) state(*http.Request) (any, error) {
 	return map[string]any{
 		"version": version, "os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": host,
 		"default_name": sanitizeName(host), "lan": lanIP(),
-		"suggest": suggestFolders(), "node": a.nodeView(), "hub": a.hubView(),
+		"suggest": suggestFolders(), "node": a.nodeView(), "hub": a.hubView(), "update": a.updateView(),
 	}, nil
+}
+
+// updateView says what the page may offer: the newest release, if newer than
+// this copy, and whether background services run an older copy than this one.
+func (a *app) updateView() map[string]any {
+	a.mu.Lock()
+	latest, busy := a.latest, a.updating
+	e, hit := a.svcCache["version"]
+	a.mu.Unlock()
+	if !hit || time.Since(e.at) > 10*time.Second {
+		e = svcEntry{serviceVersion(), time.Now()}
+		a.mu.Lock()
+		a.svcCache["version"] = e
+		a.mu.Unlock()
+	}
+	return map[string]any{"latest": latest, "newer": latest != "" && newerVersion(latest, version),
+		"services": e.status, "services_older": e.status != "" && newerVersion(version, e.status), "busy": busy}
+}
+
+// update installs the newest release (from: "github") or this copy (from:
+// "here") for this copy and the background services.
+func (a *app) update(r *http.Request) (any, error) {
+	var req struct{ From string }
+	if err := decodeBody(r, &req); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	if a.updating {
+		a.mu.Unlock()
+		return nil, errors.New("an update is already running")
+	}
+	a.updating = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.updating = false
+		delete(a.svcCache, "version")
+		delete(a.svcCache, "node")
+		delete(a.svcCache, "server")
+		a.mu.Unlock()
+	}()
+	bin, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	if req.From == "github" {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		defer cancel()
+		v, err := latestRelease(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if bin, err = downloadRelease(ctx, v); err != nil {
+			return nil, err
+		}
+		defer os.Remove(bin)
+	}
+	done, err := installBinary(bin)
+	for _, d := range done {
+		log.Printf("updated %s", d)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"done": done}, nil
 }
 
 func (a *app) nodeView() nodeView {
@@ -492,21 +569,6 @@ func (a *app) runRole(role, cfg string, service bool) error {
 	return serviceInstall(role, cfg)
 }
 
-func (a *app) nodePause(r *http.Request) (any, error) {
-	var req struct{ Paused bool }
-	if err := decodeBody(r, &req); err != nil {
-		return nil, err
-	}
-	p := sidecar(a.nodeCfg, ".paused")
-	if !req.Paused {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		return ok(), nil
-	}
-	return ok(), writePrivate(p, []byte("Paused from the relay page. Delete this file to resume.\n"))
-}
-
 func (a *app) nodeAutostart(r *http.Request) (any, error) {
 	var req struct{ On bool }
 	if err := decodeBody(r, &req); err != nil {
@@ -527,17 +589,15 @@ func (a *app) nodeAutostart(r *http.Request) (any, error) {
 func (a *app) nodeLeave(*http.Request) (any, error) {
 	a.stopChild("node")
 	a.forgetService("node")
-	if s, err := newService("node", a.nodeCfg); err == nil && s.installed() {
-		if err := s.uninstall(); err != nil {
-			return nil, err
-		}
+	return ok(), leaveNode(a.nodeCfg)
+}
+
+func (a *app) nodePause(r *http.Request) (any, error) {
+	var req struct{ Paused bool }
+	if err := decodeBody(r, &req); err != nil {
+		return nil, err
 	}
-	for _, suffix := range []string{".json", ".status.json", ".paused", ".activity.jsonl", ".activity.jsonl.1"} {
-		if err := os.Remove(sidecar(a.nodeCfg, suffix)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-	}
-	return ok(), nil
+	return ok(), setPaused(a.nodeCfg, req.Paused)
 }
 
 func (a *app) nodeActivity(*http.Request) (any, error) {
